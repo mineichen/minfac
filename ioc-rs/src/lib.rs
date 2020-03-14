@@ -180,18 +180,21 @@ mod tests {
                 None => None
             }
         }
-        fn add_resolver(&mut self, a: &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32))) {
-            //self.factories.insert(TypeId::of::<i32>(), &a);
+        fn add_resolver(&mut self, factory: &'static &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32))) {
+            self.factories.insert(TypeId::of::<i32>(), factory);
         }
     }
 
     #[test]
     fn test() {
         let mut r = Root { factories: HashMap::new() };
-        let a: &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32)) = &|cont: &mut Container, consumer: &dyn Fn(&mut Container, i32)| { 
-            consumer(cont, 10);
+            
+        // Register
+        let a: &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32)) = &|cont, consumer| { 
+            consumer(cont, 42);
         };
         r.factories.insert(TypeId::of::<i32>(), &a);
+        //r.add_resolver(&a);
 
         let mut container = Container;
         r.get_resolver().unwrap()(&mut container, &|_cont, val: i32| {
@@ -217,11 +220,6 @@ mod tests {
     impl TestTrait for TestService {
         fn get_value(&self) -> i32 {
             self.0
-        }
-    }
-    impl Drop for TestService {
-        fn drop(&mut self) {
-
         }
     }
 }
