@@ -1,0 +1,8 @@
+[package]
+name = "ioc-rs"
+version = "0.1.0"
+authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+anymap = "0.12.1"
