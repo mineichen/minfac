@@ -1,7 +1,9 @@
 use anymap::AnyMap;
-use std::any::{Any, TypeId};
+use std::{any::{Any, TypeId}, str::FromStr};
 use std::fmt::Debug;
 use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::hash::{Hash, Hasher};
 
 /*
 pub trait ServiceProvider {
@@ -75,9 +77,41 @@ fn test<TCast, TEff>(input: TEff) where TCast : From<TEff> {
     let a : TCast = input.into();
 }
 
+struct VecWrapper<'a> {
+    data: Vec<&'a dyn Fn(&dyn Fn(&i32))>
+}
+
+impl<'a> VecWrapper<'a> {
+    fn add<TNext: FnOnce(Self)>(mut self, data: &'a dyn Fn(&dyn Fn(&i32)), next: TNext) {
+        self.data.push(data);
+        next(self);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insert_fn() {
+        let mut container = VecWrapper { data: vec!() }; 
+        add_to_container(container, |w| {
+            w.data[0](&|r| {
+                println!("Results in {}", r);
+            });
+        });
+    }
+
+    fn add_to_container<TNext: FnOnce(VecWrapper)>(container: VecWrapper, next: TNext) {
+        let outer = 42;
+        container.add(
+            &|v| { 
+                let inner = 84;
+                v(&outer); 
+            },
+            next
+        );
+    }
+
     #[test]
     fn add_singleton_service() {
         let mut collection = StaticServiceCollection::new();
@@ -92,6 +126,7 @@ mod tests {
         assert_eq!(42, service.0);*/
     }
 
+    
    
     #[test]
     fn add_singleton_as_trait() {
@@ -127,11 +162,7 @@ mod tests {
     }
 
     pub struct Container;
-    impl Container {
-        fn try_attach() {
-
-        }
-    }
+   
     
     pub trait ResolvableRef<T: Sized> {
         fn resolveRef<'a>(&'a mut self, consumer: &'a dyn Fn(&mut Self, &T));
@@ -169,38 +200,150 @@ mod tests {
         }
     }
 
-    struct Root<'a> {
-        factories: HashMap<TypeId, &'a dyn Any>
+    struct AmdStyle<'a, T> {
+        factories: HashMap<AmdTypeId, *const dyn Fn(i32)>,
+        ctx: PhantomData<&'a T>
     }
 
-    impl<'a> Root<'a> {
-        fn get_resolver<T: 'static>(&self) ->  Option<&&dyn Fn(&mut Container, &dyn Fn(&mut Container, T))> {
-            match self.factories.get(&TypeId::of::<T>()) {
-                Some(u) => u.downcast_ref::<&dyn Fn(&mut Container, &dyn Fn(&mut Container, T))>(),
+    impl<'a, T> AmdStyle<'a, T> {
+        fn new() -> Self {
+            AmdStyle {
+                factories: HashMap::new(),
+                ctx: PhantomData
+            }
+        } 
+    }
+    struct AmdContext;
+    
+    #[derive(Debug, PartialEq, Eq, Hash)]
+    struct AmdTypeId {
+        is_ref: bool, 
+        type_id: TypeId
+    }
+
+    impl AmdTypeId {
+        fn new(is_ref: bool, type_id: TypeId) -> AmdTypeId {
+            AmdTypeId {
+                is_ref,
+                type_id
+            }
+        }
+    }
+    
+
+    pub trait AmdResolvable<'a, C> {
+        type Dependency: AmdResolvable<'a, C>;
+        fn get_typeid() -> AmdTypeId;
+    }
+
+    impl<'a, T> AmdResolvable<'a, T> for () {
+        type Dependency = ();
+        fn get_typeid() -> AmdTypeId {
+            AmdTypeId::new(false, TypeId::of::<()>())
+        }
+    }
+
+    impl<'a> AmdResolvable<'a, AmdContext> for i32 {
+        type Dependency = ();
+        fn get_typeid() -> AmdTypeId {
+            AmdTypeId::new(false, TypeId::of::<i32>())
+        }
+    }
+
+    impl<'a> AmdResolvable<'a, AmdContext> for &'a i32 {
+        type Dependency = ();
+        fn get_typeid() -> AmdTypeId {
+            AmdTypeId::new(false, TypeId::of::<*const i32>())
+        }
+    }
+
+    
+    impl<'a> AmdResolvable<'a, AmdContext> for String {
+        type Dependency = ();
+        fn get_typeid() -> AmdTypeId {
+            AmdTypeId::new(false, TypeId::of::<String>())
+        }
+    } 
+   
+    impl<'a, T> AmdStyle<'a, T> {
+        fn get_resolver<TResult: AmdResolvable<'a, T>>(&self) ->  Option<&'a dyn Fn(TResult::Dependency, &dyn Fn(TResult))> {
+            match self.factories.get(&TResult::get_typeid()) {
+                Some(u) => {
+                    let v = *u as *const dyn Fn(TResult::Dependency, &dyn Fn(TResult));
+                    Some(unsafe {&*v})
+                },
                 None => None
             }
         }
-        fn add_resolver(&mut self, factory: &'static &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32))) {
-            self.factories.insert(TypeId::of::<i32>(), factory);
+
+        fn add_resolver<TResult: AmdResolvable<'a, T>>(&mut self, factory: &'a dyn Fn(TResult::Dependency, &dyn Fn(TResult))) {
+            self.factories.insert(
+                TResult::get_typeid(), 
+                factory as *const dyn Fn(TResult::Dependency, &dyn Fn(TResult)) as *const dyn Fn(i32)
+            );
+        }
+    }
+    
+    #[test]
+    fn test_amd_style() {
+        let mut r = AmdStyle::<AmdContext>::new();
+        {
+            r.add_resolver(&|_, consumer| {
+                consumer(42);
+            });
+            
+            r.add_resolver(&move| _, consumer| {
+                consumer(String::from("Test"));
+            });
+        }
+        let resolver = r.get_resolver().unwrap();
+        resolver((), &|r: i32| {
+            println!("coolio {}", r);
+        });
+    }
+
+    
+    struct Root {
+        factories: HashMap<TypeId, *const dyn Fn(i32)>
+    }
+
+    impl<'a> Root {
+
+        fn get_resolver<T: 'static>(&self) ->  Option<&dyn Fn(&mut Container, &dyn Fn(&mut Container, T))> {
+            match self.factories.get(&TypeId::of::<T>()) {
+                Some(u) => {
+                    let v = *u as *const dyn Fn(&mut Container, &dyn Fn(&mut Container, T));
+                    Some(unsafe {&*v})
+                },
+                None => None
+            }
+        }
+        fn add_resolver<T: 'static>(&mut self, factory: &dyn Fn(&mut Container, &dyn Fn(&mut Container, T))) {
+            self.factories.insert(TypeId::of::<T>(), factory as *const dyn Fn(&mut Container, &dyn Fn(&mut Container, T)) as *const dyn Fn(i32));
         }
     }
 
     #[test]
     fn test() {
         let mut r = Root { factories: HashMap::new() };
-            
-        // Register
-        let a: &dyn Fn(&mut Container, &dyn Fn(&mut Container, i32)) = &|cont, consumer| { 
-            consumer(cont, 42);
-        };
-        r.factories.insert(TypeId::of::<i32>(), &a);
-        //r.add_resolver(&a);
+        let data = 42;
+        
+        r.add_resolver(&|cont, consumer| { 
+            consumer(cont, data);
+        });
+        r.add_resolver(&|cont, consumer| {
+            let testTrait: Box<dyn TestTrait> = Box::new(TestService(42));
+            consumer(cont, testTrait);
+        });
+    
 
         let mut container = Container;
-        r.get_resolver().unwrap()(&mut container, &|_cont, val: i32| {
-            println!("Really worked {}", val);
+        r.get_resolver().unwrap()(&mut container, &|_cont, val: Box<dyn TestTrait>| {
+            println!("Really worked {:?}", val);
         });
     }
+
+    
 
 /*
     impl Resolvable<i32> for Container {
@@ -211,7 +354,7 @@ mod tests {
     }
 
 */
-    trait TestTrait {
+    trait TestTrait: Debug {
         fn get_value(&self) -> i32; 
     }
     #[derive(Debug)]
