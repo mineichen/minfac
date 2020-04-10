@@ -1,5 +1,6 @@
 use core::{
-    any::{Any, TypeId}
+    any::{Any, TypeId},
+    marker::PhantomData
 };
 use std::collections::HashMap;
 
@@ -12,20 +13,39 @@ pub struct Container<'a> {
 
 pub trait Resolvable{
     type Inner: Any;
-    const IS_REFERENCE: bool;
+    fn resolve(&self, resolver: &dyn Resolver<Self::Inner>);
 }
 
-pub struct Ref<T>(T);
+pub struct Ref<T, TFn: Fn(&T)> {
+    callback: TFn,
+    phantom: PhantomData<T>
+}
+
+impl<T, TFn: Fn(&T)> Ref<T, TFn> {
+    fn new(callback: TFn) -> Self {
+        Self {
+            callback,
+            phantom: PhantomData
+        }
+    }
+}
+
 pub struct Val<T>(T);
 
-impl<T: Any> Resolvable for Ref<T> {
+impl<'a, T: Any, TFn: Fn(&T)> Resolvable for Ref<T, TFn> {
     type Inner = T;
-    const IS_REFERENCE: bool = true;
+    fn resolve(&self, resolver: &dyn Resolver<Self::Inner>) {
+        resolver.by_ref(&|value| {
+            (self.callback)(value);
+        });
+    }
 }
 
 impl<T: Any> Resolvable for Val<T> {
     type Inner = T;
-    const IS_REFERENCE: bool = false;
+    fn resolve(&self, _resolver: &dyn Resolver<Self::Inner>) {
+
+    }
 }
 
 impl<'a> Container<'a> {
@@ -34,7 +54,8 @@ impl<'a> Container<'a> {
             data: HashMap::new()
         }
     }
-    pub fn add<T: Any, TNext: Fn(Self)>(mut self, data: &'a RefResolver<'a, T>, next: TNext) {
+
+    pub fn add_ref<T: Any, TNext: Fn(Self)>(mut self, data: &'a RefResolver<'a, T>, next: TNext) {
         self.data.insert(
             TypeId::of::<T>(), 
             data as *const RefResolver<T> as *const RefResolver<bool>
@@ -42,19 +63,18 @@ impl<'a> Container<'a> {
         next(self);
     }
 
-    pub fn try_resolve<T: Resolvable, TFn: Fn(&T::Inner)>(&self, callback: TFn) {
-        self.call_with_resolver::<Ref<T::Inner>, _>(|a| {
-            a.by_ref(&|value| { 
-                callback(value); 
-            })
+    pub fn try_resolve<T: Resolvable>(&self, resolvable: T) {
+        self.call_with_resolver::<T>(&|a| {
+            resolvable.resolve(a);
         })
     }
 
-    pub fn call_with_resolver<T: Resolvable, TFn: Fn(&dyn Resolver<T::Inner>)>(&self, callback: TFn) {
+    pub fn call_with_resolver<T: Resolvable>(&self, callback: &dyn Fn(&dyn Resolver<T::Inner>)) {
         if let Some(tmp) = self.data.get(&TypeId::of::<T::Inner>()) {
             let reference = *tmp as *const RefResolver<'a, T::Inner>;
             callback(&unsafe{ &*reference });
         }
+        
     }
 }
 
@@ -85,10 +105,10 @@ mod tests {
     fn insert_fn() {
         let modified = RefCell::new(false);
         add_to_container(Container::new(), |w| {
-            w.try_resolve::<Ref<i32>, _>(|r| {
+            w.try_resolve(Ref::new(|r: &i32| {
                 *modified.borrow_mut() = true;
                 assert!(*r == 42);
-            });
+            }));
         });
         let was_resolved = *modified.borrow();
         assert!(was_resolved);
@@ -96,7 +116,7 @@ mod tests {
 
     fn add_to_container<TNext: Fn(Container)>(container: Container, next: TNext) {
         let outer: RefCell<Option<i32>> = RefCell::new(None);
-        container.add::<i32, _>(
+        container.add_ref::<i32, _>(
             &RefResolver::new(&|v| { 
                 v(&outer.borrow_mut().get_or_insert(42)); 
             }),
