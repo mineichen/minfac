@@ -8,6 +8,26 @@ use core::marker::PhantomData;
 use core::hash::{Hash, Hasher};
 use core::fmt::Debug;
 
+struct MyNotAny<T> {
+    phan: PhantomData<[T]>
+}
+
+impl<T> MyNotAny<T> {
+    fn new() -> Self {
+        MyNotAny {
+            phan: PhantomData
+        }
+    }
+}
+
+fn test_fn() {
+    accAny(MyNotAny::<i32>::new())
+}
+
+fn accAny<T: Any>(arg: T) {
+
+}
+
 /*
 pub trait ServiceProvider {
     fn get<T: 'static>(&mut self) -> &mut T;
