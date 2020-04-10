@@ -1,33 +1,31 @@
 use core::{
-    any::{Any, TypeId},
-    marker::PhantomData
+    any::{Any, TypeId}
 };
 use std::collections::HashMap;
 
-mod playground;
+// mod playground;
 
 pub struct Container<'a> {
-    //ref_factories: HashMap<TypeId, *const dyn Fn(i32)>,
-
+    // bool ist just a placeholder
     data: HashMap<TypeId, *const RefResolver<'a, bool>>
 }
 
 pub trait Resolvable{
-    type inner: Any;
-    const is_ref: bool;
+    type Inner: Any;
+    const IS_REFERENCE: bool;
 }
 
-struct Ref<T>(T);
-struct Val<T>(T);
+pub struct Ref<T>(T);
+pub struct Val<T>(T);
 
 impl<T: Any> Resolvable for Ref<T> {
-    type inner = T;
-    const is_ref: bool = true;
+    type Inner = T;
+    const IS_REFERENCE: bool = true;
 }
 
 impl<T: Any> Resolvable for Val<T> {
-    type inner = T;
-    const is_ref: bool = false;
+    type Inner = T;
+    const IS_REFERENCE: bool = false;
 }
 
 impl<'a> Container<'a> {
@@ -36,26 +34,25 @@ impl<'a> Container<'a> {
             data: HashMap::new()
         }
     }
-    pub fn add_ref<TNext: FnOnce(Self)>(mut self, data: &'a RefResolver<'a, i32>, next: TNext) {
+    pub fn add<T: Any, TNext: Fn(Self)>(mut self, data: &'a RefResolver<'a, T>, next: TNext) {
         self.data.insert(
-            TypeId::of::<i32>(), 
-            data as *const RefResolver<i32> as *const RefResolver<bool>
+            TypeId::of::<T>(), 
+            data as *const RefResolver<T> as *const RefResolver<bool>
         );
         next(self);
     }
 
-    pub fn try_resolve<TFn: Fn(&i32)>(&self, callback: TFn) {
-        //(self.data.get(&TypeId::of::<i32>()).unwrap().factory)(&callback);
-        self.call_with_resolver::<Ref<i32>, _>(|a| {
-            a.by_ref(&|myRef| { 
-                callback(myRef); 
+    pub fn try_resolve<T: Resolvable, TFn: Fn(&T::Inner)>(&self, callback: TFn) {
+        self.call_with_resolver::<Ref<T::Inner>, _>(|a| {
+            a.by_ref(&|value| { 
+                callback(value); 
             })
         })
     }
 
-    pub fn call_with_resolver<T: Resolvable, TFn: Fn(&dyn Resolver<T::inner>)>(&self, callback: TFn) {
-        if let Some(tmp) = self.data.get(&TypeId::of::<T::inner>()) {
-            let reference = *tmp as *const RefResolver<'a, T::inner>;
+    pub fn call_with_resolver<T: Resolvable, TFn: Fn(&dyn Resolver<T::Inner>)>(&self, callback: TFn) {
+        if let Some(tmp) = self.data.get(&TypeId::of::<T::Inner>()) {
+            let reference = *tmp as *const RefResolver<'a, T::Inner>;
             callback(&unsafe{ &*reference });
         }
     }
@@ -86,10 +83,9 @@ mod tests {
     use std::cell::RefCell;
     #[test]
     fn insert_fn() {
-        let mut modified = RefCell::new(false);
-        let mut container = Container::new(); 
-        add_to_container(container, |w| {
-            w.try_resolve(|r| {
+        let modified = RefCell::new(false);
+        add_to_container(Container::new(), |w| {
+            w.try_resolve::<Ref<i32>, _>(|r| {
                 *modified.borrow_mut() = true;
                 assert!(*r == 42);
             });
@@ -98,9 +94,9 @@ mod tests {
         assert!(was_resolved);
     }
 
-    fn add_to_container<TNext: FnOnce(Container)>(mut container: Container, next: TNext) {
+    fn add_to_container<TNext: Fn(Container)>(container: Container, next: TNext) {
         let outer: RefCell<Option<i32>> = RefCell::new(None);
-        container.add_ref(
+        container.add::<i32, _>(
             &RefResolver::new(&|v| { 
                 v(&outer.borrow_mut().get_or_insert(42)); 
             }),
@@ -108,18 +104,3 @@ mod tests {
         );
     }
 }
- /*
-            match self.factories.get(&TResult::get_typeid()) {
-                Some(u) => {
-                    let v = *u as *const dyn Fn(TResult::Dependency, &dyn Fn(TResult));
-                    Some(unsafe {&*v})
-                },
-                None => None
-            }*/
-        
-        
-            /*
-            self.factories.insert(
-                TResult::get_typeid(), 
-                factory as *const dyn Fn(TResult::Dependency, &dyn Fn(TResult)) as *const dyn Fn(i32)
-            );*/
