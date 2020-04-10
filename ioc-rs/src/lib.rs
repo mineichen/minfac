@@ -9,8 +9,7 @@ mod playground;
 pub struct Container<'a> {
     //ref_factories: HashMap<TypeId, *const dyn Fn(i32)>,
 
-    data: HashMap<TypeId, *const RefResolver<'a, i32>>,
-    phantom: PhantomData<&'a i32>
+    data: HashMap<TypeId, *const RefResolver<'a, bool>>
 }
 
 pub trait Resolvable{
@@ -34,12 +33,14 @@ impl<T: Any> Resolvable for Val<T> {
 impl<'a> Container<'a> {
     pub fn new() -> Self {
         Self {
-            data: HashMap::new(),
-            phantom: PhantomData
+            data: HashMap::new()
         }
     }
-    pub fn add<TNext: FnOnce(Self)>(mut self, data: &'a RefResolver<'a, i32>, next: TNext) {
-        self.data.insert(TypeId::of::<i32>(), data);
+    pub fn add_ref<TNext: FnOnce(Self)>(mut self, data: &'a RefResolver<'a, i32>, next: TNext) {
+        self.data.insert(
+            TypeId::of::<i32>(), 
+            data as *const RefResolver<i32> as *const RefResolver<bool>
+        );
         next(self);
     }
 
@@ -52,9 +53,9 @@ impl<'a> Container<'a> {
         })
     }
 
-    pub fn call_with_resolver<T: Resolvable, TFn: Fn(&dyn Resolver<i32>)>(&self, callback: TFn) {
-        if let Some(tmp) = self.data.get(&TypeId::of::<i32>()) {
-            let reference = *tmp as *const RefResolver<'a, i32>;
+    pub fn call_with_resolver<T: Resolvable, TFn: Fn(&dyn Resolver<T::inner>)>(&self, callback: TFn) {
+        if let Some(tmp) = self.data.get(&TypeId::of::<T::inner>()) {
+            let reference = *tmp as *const RefResolver<'a, T::inner>;
             callback(&unsafe{ &*reference });
         }
     }
@@ -99,7 +100,7 @@ mod tests {
 
     fn add_to_container<TNext: FnOnce(Container)>(mut container: Container, next: TNext) {
         let outer: RefCell<Option<i32>> = RefCell::new(None);
-        container.add(
+        container.add_ref(
             &RefResolver::new(&|v| { 
                 v(&outer.borrow_mut().get_or_insert(42)); 
             }),
