@@ -8,25 +8,8 @@ use core::marker::PhantomData;
 use core::hash::{Hash, Hasher};
 use core::fmt::Debug;
 
-struct MyNotAny<T> {
-    phan: PhantomData<[T]>
-}
 
-impl<T> MyNotAny<T> {
-    fn new() -> Self {
-        MyNotAny {
-            phan: PhantomData
-        }
-    }
-}
 
-fn test_fn() {
-    accAny(MyNotAny::<i32>::new())
-}
-
-fn accAny<T: Any>(arg: T) {
-
-}
 
 /*
 pub trait ServiceProvider {
@@ -65,35 +48,97 @@ impl<'a> StaticServiceCollection<'a> {
     }
 }
 */
-struct Cons<T> {
-    item: T
-    //fn next() : Option<T>;
-}
 
-trait List<T> {
-    fn next() -> Option<T>;
-}
-
-impl<T> List<T> for Cons<T> {
-    fn next() -> Option<T> {
-        None
-    }
-}
 
 fn test<TCast, TEff>(input: TEff) where TCast : From<TEff> {
     let a : TCast = input.into();
 }
 
-struct VecWrapper<'a> {
-    data: Vec<&'a dyn Fn(&dyn Fn(&i32))>
+struct Cons<'a, T> {
+    item: T,
+    next: &'a dyn RefListPoly<'a, T>
 }
 
-impl<'a> VecWrapper<'a> {
-    
+struct Empty(); 
+
+trait RefListPoly<'a, T> {
+    fn get_value(&'a self) -> Option<&'a T>;
 }
+impl<'a, T> RefListPoly<'a, T> for Cons<'a, T> {
+    fn get_value(&'a self) -> Option<&'a T> {
+        //unimplemented!()
+        Some(&self.item)
+    }
+}
+
+impl<'a, T> RefListPoly<'a, T> for Empty {
+    fn get_value(&'a self) -> Option<&'a T> {
+        None
+    }
+}
+
+
+enum RefList<'a, T> {
+    Some(T, &'a RefList<'a, T>),
+    None()
+}
+
+impl<'a, T> RefList<'a, T> {
+    fn iter(&'a self) -> RefListIterator<'a, T> {
+        RefListIterator(self)
+    }
+}
+struct RefListIterator<'a, T>(&'a RefList<'a, T>);
+
+impl<'a, T: 'a> Iterator for RefListIterator<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let RefList::Some(value, next) = self.0 {
+            self.0 = next;
+            return Some(value);
+        }
+        None
+    }
+}
+
+impl<'a, T> Default for RefList<'a, T> {
+    fn default() -> Self { RefList::<T>::None()}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_test() {
+        let list : Cons<i32> = Cons { item: 12, next: &Empty() };
+        let optionList = RefList::<i32>::Some(10, &RefList::<i32>::None());
+
+        assert!(1 == optionList.iter().count());
+    }
+    struct Foo<T: Any>(PhantomData<T>);
+
+    trait Fooable {
+        fn get_type(&self) -> TypeId;
+    }
+
+    impl<T: Any> Fooable for Foo<T> {
+        fn get_type(&self) -> TypeId {
+            TypeId::of::<T>()
+        }
+    }
+
+    #[test]
+    fn test_fn() {
+        let mut vec: Vec<*const dyn Fooable> = vec!();
+        vec.push(&Foo::<i32>(PhantomData));
+        vec.push(&Foo::<i64>(PhantomData));
+        
+        for item in vec {
+            let item = unsafe { &*item };
+            dbg!(item.get_type());
+        }
+    }
 
     
 

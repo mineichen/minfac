@@ -4,7 +4,8 @@ use core::{
 };
 use std::collections::HashMap;
 
-// mod playground;
+//mod playground;
+pub mod ref_list;
 
 pub struct Container<'a> {
     // bool ist just a placeholder
@@ -12,53 +13,36 @@ pub struct Container<'a> {
 }
 
 pub trait Resolvable{
-    type Inner: Any;
-    fn resolve(&self, resolver: &dyn Resolver<Self::Inner>);
+    type Result: Any;
+    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result));
 }
 
-pub struct ResolvableRef<T, TFn: Fn(&T)> {
-    callback: TFn,
+impl Resolvable for () {
+    type Result = ();
+    fn resolve(_: &Container, _callback: &dyn Fn(&Self::Result)) {
+        ()
+    }
+}
+/*
+impl<T1: ResolvableT, T2> Resolvable for (T1, T2) {
+    type Result = (T1, T2);
+    fn resolve(&self, container: &Container) {
+
+    }
+}*/
+pub struct Dynamic<T> {
     phantom: PhantomData<T>
 }
 
-impl<T, TFn: Fn(&T)> ResolvableRef<T, TFn> {
-    pub fn new(callback: TFn) -> Self {
-        Self {
-            callback,
-            phantom: PhantomData
+impl<'a, T: Any> Resolvable for Dynamic<T> {
+    type Result = T;
+    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
+        if let Some(tmp) = container.data.get(&TypeId::of::<T>()) {
+            let reference = *tmp as *const RefResolver<'a, T>;
+            (unsafe{ &*reference }.factory)((), &|value| {
+                (callback)(value);
+            });
         }
-    }
-}
-
-impl<'a, T: Any, TFn: Fn(&T)> Resolvable for ResolvableRef<T, TFn> {
-    type Inner = T;
-    fn resolve(&self, resolver: &dyn Resolver<Self::Inner>) {
-        resolver.by_ref(&|value| {
-            (self.callback)(value);
-        });
-    }
-}
-
-pub struct ResolvableVal<T, TFn: Fn(T)> {
-    callback: TFn,
-    phantom: PhantomData<T>
-}
-
-impl<T, TFn: Fn(T)> ResolvableVal<T, TFn> {
-    pub fn new(callback: TFn) -> Self {
-        Self {
-            callback,
-            phantom: PhantomData
-        }
-    }
-}
-
-impl<'a, T: Any, TFn: Fn(T)> Resolvable for ResolvableVal<T, TFn> {
-    type Inner = T;
-    fn resolve(&self, resolver: &dyn Resolver<Self::Inner>) {
-        resolver.by_val(&|value| {
-            (self.callback)(value);
-        });
     }
 }
 
@@ -77,44 +61,30 @@ impl<'a> Container<'a> {
         next(self);
     }
 
-    pub fn try_resolve<T: Resolvable>(&self, resolvable: T) {
-        self.call_with_resolver::<T>(&|a| {
-            resolvable.resolve(a);
-        })
+    pub fn try_resolve<T: Resolvable>(&self, callback: &dyn Fn(&T::Result)) {
+        T::resolve(&self, callback);
     }
-
-    pub fn call_with_resolver<T: Resolvable>(&self, callback: &dyn Fn(&dyn Resolver<T::Inner>)) {
-        if let Some(tmp) = self.data.get(&TypeId::of::<T::Inner>()) {
-            let reference = *tmp as *const RefResolver<'a, T::Inner>;
-            callback(&unsafe{ &*reference });
-        }
+/*
+    pub fn get_resolver<T: Any>(&self) -> Option<*const dyn Resolver<T>> {
+        //unimplemented!()
         
-    }
-}
-
-pub trait Resolver<T> {
-
-    fn by_ref(&self, callback: &dyn Fn(&T));
-    fn by_val(&self, callback: &dyn Fn(T));
+        self.data.get(&TypeId::of::<T>())
+            .map(|tmp| {
+                return *tmp as *const dyn Resolver<T>;
+            })
+    }*/
 }
 
 pub struct RefResolver<'a, T> {
-    factory: &'a dyn Fn(&dyn Fn(&T))
+    factory: &'a dyn Fn((), &dyn Fn(&T))
 }
 
 impl<'a, T> RefResolver<'a, T> {
-    pub fn new(factory: &'a dyn Fn(&dyn Fn(&T))) -> Self {
+    pub fn new(factory: &'a dyn Fn((), &dyn Fn(&T))) -> Self {
         Self { factory }
     }
 }
-impl<'a, T> Resolver<T> for &'a RefResolver<'a, T> {
-    fn by_ref(&self, callback: &dyn Fn(&T)) {
-        (self.factory)(callback);
-    }
-    fn by_val(&self, _callback: &dyn Fn(T)) {
-        panic!("RefResolver doesn't support by_val");
-    }
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -131,13 +101,18 @@ mod tests {
     #[test]
     fn resolve_reference_twice_results() {
         let modified = RefCell::new(false);
+        let stack = &modified as *const RefCell<bool> as usize;
         add_to_container(Container::new(), |w| {
-            w.try_resolve(ResolvableRef::new(|first: &Instant| {
-                w.try_resolve(ResolvableRef::new(|second: &Instant| {
+            let a = 1;
+            println!("AfterAddStacksize: {}", stack - &w as *const Container as usize);
+            println!("AfterAddStacksize: {}", stack - &a as *const i32 as usize);
+            w.try_resolve::<Dynamic::<Instant>>(&|first: &Instant| {
+                w.try_resolve::<Dynamic::<Instant>>( &|second: &Instant| {
                     *modified.borrow_mut() = true;
+                    println!("Stacksize: {}", stack - second as *const Instant as usize);
                     assert!(*first == *second);
-                }));
-            }));
+                });
+            });
         });
         let was_resolved = *modified.borrow();
         assert!(was_resolved);
@@ -149,7 +124,7 @@ mod tests {
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
         container.add_ref(
-            &RefResolver::new(&move|v| {       
+            &RefResolver::new(&move|(), v| {       
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
