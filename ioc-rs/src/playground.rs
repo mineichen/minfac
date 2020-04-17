@@ -49,8 +49,36 @@ impl<'a> StaticServiceCollection<'a> {
 }
 */
 
+trait FamilyLt<'a> {
+    type Out;
+}
 
-fn test<TCast, TEff>(input: TEff) where TCast : From<TEff> {
+struct SingleStructFamily<T: ?Sized>(PhantomData<T>);
+
+impl<'a, T: 'a + ?Sized> FamilyLt<'a> for SingleStructFamily<T> {
+    type Out = (&'a T,);
+}
+
+trait Thing {
+    type Result: for<'a> FamilyLt<'a>;
+    fn resolve<TFn>(container: &i32, c: TFn) where for<'a> TFn: Fn(<Self::Result as FamilyLt<'a>>::Out);
+}
+struct Foo();
+
+impl Thing for Foo {
+    type Result = SingleStructFamily<i32>;
+    fn resolve<TFn>(container: &i32, c: TFn) where for<'i> TFn: Fn(<Self::Result as FamilyLt<'i>>::Out) {
+        let cant_be_static = 42;
+        let r: <Self::Result as FamilyLt<'_>>::Out = (&cant_be_static,);
+        //(c)(input);
+    }
+}
+/*
+fn test(content: *const i32 ) {
+    unsafe { myfun(content);}
+}*/
+
+fn testt<TCast, TEff>(input: TEff) where TCast : From<TEff> {
     let a : TCast = input.into();
 }
 

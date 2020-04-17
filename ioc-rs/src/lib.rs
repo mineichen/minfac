@@ -9,36 +9,46 @@ pub mod ref_list;
 
 pub struct Container<'a> {
     // bool ist just a placeholder
-    data: HashMap<TypeId, *const RefResolver<'a, bool>>
+    data: HashMap<TypeId, *const DynamicResolver<'a, bool>>
 }
 
 pub trait Resolvable{
-    type Result: Any;
+    type Result;
     fn resolve(container: &Container, callback: &dyn Fn(&Self::Result));
 }
 
 impl Resolvable for () {
     type Result = ();
-    fn resolve(_: &Container, _callback: &dyn Fn(&Self::Result)) {
-        ()
+    fn resolve(_: &Container, callback: &dyn Fn(&Self::Result)) {
+        callback(&());
     }
 }
-/*
-impl<T1: ResolvableT, T2> Resolvable for (T1, T2) {
-    type Result = (T1, T2);
-    fn resolve(&self, container: &Container) {
 
+pub struct RefTuple<T>(*const T);
+impl<T> RefTuple<T> {
+    pub fn i0(&self) -> &T { 
+        unsafe {&*self.0}
     }
-}*/
+}
+
+impl<T1: Resolvable> Resolvable for (T1,) {
+    type Result = RefTuple<T1::Result>;
+    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
+        T1::resolve(container,&|t1| {
+            callback(&RefTuple(t1 as *const T1::Result) );
+        });
+    }
+}
+
 pub struct Dynamic<T> {
     phantom: PhantomData<T>
 }
 
-impl<'a, T: Any> Resolvable for Dynamic<T> {
+impl<T: Any> Resolvable for Dynamic<T> {
     type Result = T;
     fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
         if let Some(tmp) = container.data.get(&TypeId::of::<T>()) {
-            let reference = *tmp as *const RefResolver<'a, T>;
+            let reference = *tmp as *const DynamicResolver<T>;
             (unsafe{ &*reference }.factory)((), &|value| {
                 (callback)(value);
             });
@@ -53,33 +63,24 @@ impl<'a> Container<'a> {
         }
     }
 
-    pub fn add_ref<T: Any, TNext: Fn(Self)>(mut self, data: &'a RefResolver<'a, T>, next: TNext) {
+    pub fn add<T: Any, TNext: FnOnce(Self)>(mut self, data: &'a DynamicResolver<'a, T>, next: TNext) {
         self.data.insert(
             TypeId::of::<T>(), 
-            data as *const RefResolver<T> as *const RefResolver<bool>
+            data as *const DynamicResolver<T> as *const DynamicResolver<bool>
         );
         next(self);
     }
 
-    pub fn try_resolve<T: Resolvable>(&self, callback: &dyn Fn(&T::Result)) {
+    pub fn try_resolve<T: Resolvable>(&'a self, callback: &dyn Fn(&T::Result)) {
         T::resolve(&self, callback);
     }
-/*
-    pub fn get_resolver<T: Any>(&self) -> Option<*const dyn Resolver<T>> {
-        //unimplemented!()
-        
-        self.data.get(&TypeId::of::<T>())
-            .map(|tmp| {
-                return *tmp as *const dyn Resolver<T>;
-            })
-    }*/
 }
 
-pub struct RefResolver<'a, T> {
+pub struct DynamicResolver<'a, T> {
     factory: &'a dyn Fn((), &dyn Fn(&T))
 }
 
-impl<'a, T> RefResolver<'a, T> {
+impl<'a, T> DynamicResolver<'a, T> {
     pub fn new(factory: &'a dyn Fn((), &dyn Fn(&T))) -> Self {
         Self { factory }
     }
@@ -99,14 +100,34 @@ mod tests {
     };
 
     #[test]
-    fn resolve_reference_twice_results() {
+    fn resolve_empty_tuple() {
+        let modified = RefCell::new(false);
+        Container::new().try_resolve::<()>(&|t: &()| {
+            *modified.borrow_mut() = true;
+        });
+        let was_resolved = *modified.borrow();
+        assert!(was_resolved);
+    }
+
+    #[test]
+    fn resolve_single_struct() {
+        let modified = RefCell::new(false);
+        add_to_container(Container::new(), |container| {
+            container.try_resolve::<(Dynamic<TestService>,)>(&|t| {
+                *modified.borrow_mut() = true;
+            });
+        });
+        
+        let was_resolved = *modified.borrow();
+        assert!(was_resolved);
+    }
+
+    #[test]
+    fn resolve_dynamic_twice_results() {
         let modified = RefCell::new(false);
         let stack = &modified as *const RefCell<bool> as usize;
         add_to_container(Container::new(), |w| {
-            let a = 1;
-            println!("AfterAddStacksize: {}", stack - &w as *const Container as usize);
-            println!("AfterAddStacksize: {}", stack - &a as *const i32 as usize);
-            w.try_resolve::<Dynamic::<Instant>>(&|first: &Instant| {
+             w.try_resolve::<Dynamic::<Instant>>(&|first: &Instant| {
                 w.try_resolve::<Dynamic::<Instant>>( &|second: &Instant| {
                     *modified.borrow_mut() = true;
                     println!("Stacksize: {}", stack - second as *const Instant as usize);
@@ -123,8 +144,8 @@ mod tests {
         // (e.g. get_or_insert() fails the second time because a immutable reference exists, even though it wouldn't change the data twice)
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
-        container.add_ref(
-            &RefResolver::new(&move|(), v| {       
+        container.add(
+            &DynamicResolver::new(&move|(), v| {       
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
@@ -132,7 +153,20 @@ mod tests {
                 
                 v(outer.borrow().as_ref().unwrap());
             }),
-            next
-        );
+            
+            move|c| {
+                c.add(&DynamicResolver::new(&move|(), v| {
+                    let a = &10;
+                    let b: &i32 = &42;
+                    
+                    v(&TestService{ a, b });
+                }), next)
+            }
+        );  
+    }
+
+    struct TestService<'a> {
+        a: &'a i32,
+        b: &'a i32
     }
 }
