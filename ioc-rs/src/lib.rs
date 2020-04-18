@@ -63,10 +63,13 @@ impl<'a> Container<'a> {
         }
     }
 
-    pub fn add<T: Any, TNext: FnOnce(Self)>(mut self, data: &'a DynamicResolver<'a, T>, next: TNext) {
+    pub fn add<T, TNext>(mut self, factory: &'a dyn Fn(&(), &dyn Fn(&T)), next: TNext) 
+        where T: Any, TNext: FnOnce(Self) 
+    {
+        let resolvable = DynamicResolver::new(factory);
         self.data.insert(
             TypeId::of::<T>(), 
-            data as *const DynamicResolver<T> as *const DynamicResolver<bool>
+            &resolvable as *const DynamicResolver<T> as *const DynamicResolver<bool>
         );
         next(self);
     }
@@ -156,22 +159,22 @@ mod tests {
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
         container.add(
-            &DynamicResolver::new(&move|(), resolve| {       
+            &move|(), resolve| {       
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
                 }        
                 
                 resolve(outer.borrow().as_ref().unwrap());
-            }),
+            },
             
             move|c| {
-                c.add(&DynamicResolver::new(&move|(), resolve| {
+                c.add(&move|(), resolve| {
                     let a = &42;
                     let b: &i32 = &10;
                     
                     resolve(&TestService{ a, b });
-                }), next)
+                }, next)
             }
         );  
     }
