@@ -13,12 +13,12 @@ pub struct Container<'a> {
 
 pub trait Resolvable {
     type Result; 
-    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result));
+    fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn);
 }
 
 impl Resolvable for () {
     type Result = ();
-    fn resolve(_: &Container, callback: &dyn Fn(&Self::Result)) {
+    fn resolve<TFn: Fn(&Self::Result)>(_: &Container, callback: TFn) {
         callback(&());
     }
 }
@@ -32,8 +32,8 @@ impl<T> RefTuple<T> {
 
 impl<T1: Resolvable> Resolvable for (T1,) {
     type Result = RefTuple<T1::Result>;
-    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
-        T1::resolve(container,&|t1| {
+    fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn) {
+        T1::resolve(container,|t1| {
             callback(&RefTuple(t1 as *const T1::Result) );
         });
     }
@@ -45,7 +45,7 @@ pub struct Dynamic<T: Any> {
 
 impl<T: Any> Resolvable for Dynamic<T> {
     type Result = T;
-    fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
+    fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn) {
         if let Some(tmp) = container.data.get(&TypeId::of::<T>()) {
             let reference = *tmp as *const DynamicResolver<T>;
             (unsafe{ &*reference }.factory)(container, &|value| {
@@ -62,12 +62,15 @@ impl<'a> Container<'a> {
         }
     }
 
-    pub fn add<TDependency: Resolvable, T, TFactory, TNext>(mut self, factory: TFactory , next: TNext) 
-        where T: Any, TNext: FnOnce(Self), TFactory: Fn(&TDependency::Result, &dyn Fn(&T)) 
+    pub fn add<TDependency, T, TFactory, TNext>(mut self, factory: TFactory , next: TNext) 
+        where TDependency: Resolvable, 
+            T: Any, 
+            TNext: FnOnce(Self), 
+            TFactory: Fn(&TDependency::Result, &dyn Fn(&T))
     {
         let ctx = &DynamicResolver::new(
             &|c: &Container, cb: &dyn Fn(&T)| { 
-                c.try_resolve::<TDependency>(&|c| {
+                TDependency::resolve(c, |c| {
                     factory(c, cb)
                 });
             }
@@ -108,7 +111,7 @@ mod tests {
     #[test]
     fn resolve_empty_tuple() {
         let modified = RefCell::new(false);
-        Container::new().try_resolve::<()>(&|_: &()| {
+        Container::new().try_resolve::<()>(&|_| {
             *modified.borrow_mut() = true;
         });
         let was_resolved = *modified.borrow();
@@ -150,8 +153,8 @@ mod tests {
     fn resolve_dynamic_with_dependency() {
         let modified = RefCell::new(false);
         add_to_container(Container::new(), |c| {
-            c.add::<Dynamic<TestService>, _, _, _>(move|dep, resolve| {
-                resolve(&(1.5 * (*dep.a as f32)));
+            c.add::<Dynamic<TestService>, _, _, _>(move|test_service, resolve| {
+                resolve(&(1.5 * (*test_service.a as f32)));
             }, |c| {
                 c.try_resolve::<Dynamic<f32>>(&|number| {
                     *modified.borrow_mut() = true;
