@@ -13,7 +13,7 @@ pub struct Container<'a> {
 }
 
 pub trait Resolvable{
-    type Result;
+    type Result; 
     fn resolve(container: &Container, callback: &dyn Fn(&Self::Result));
 }
 
@@ -63,10 +63,10 @@ impl<'a> Container<'a> {
         }
     }
 
-    pub fn add<T, TNext>(mut self, factory: &'a dyn Fn(&(), &dyn Fn(&T)), next: TNext) 
-        where T: Any, TNext: FnOnce(Self) 
+    pub fn add<T, TFactory, TNext>(mut self, factory: TFactory , next: TNext) 
+        where T: Any, TNext: FnOnce(Self), TFactory: Fn(&(), &dyn Fn(&T))
     {
-        let resolvable = DynamicResolver::new(factory);
+        let resolvable = DynamicResolver::new(&factory);
         self.data.insert(
             TypeId::of::<T>(), 
             &resolvable as *const DynamicResolver<T> as *const DynamicResolver<bool>
@@ -153,13 +153,13 @@ mod tests {
         assert!(was_resolved);
     }
 
-    fn add_to_container<TNext: Fn(Container)>(container: Container, next: TNext) {
+    fn add_to_container<TNext: FnOnce(Container)>(container: Container, next: TNext) {
         // OnceCell would be much more appropriate, because RefCell fails at runtime 
         // (e.g. get_or_insert() fails the second time because a immutable reference exists, even though it wouldn't change the data twice)
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
         container.add(
-            &move|(), resolve| {       
+            move|(), resolve| {       
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
@@ -169,7 +169,7 @@ mod tests {
             },
             
             move|c| {
-                c.add(&move|(), resolve| {
+                c.add(move|(), resolve| {
                     let a = &42;
                     let b: &i32 = &10;
                     
