@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn resolve_empty_tuple() {
         let modified = RefCell::new(false);
-        Container::new().try_resolve::<()>(&|t: &()| {
+        Container::new().try_resolve::<()>(&|_: &()| {
             *modified.borrow_mut() = true;
         });
         let was_resolved = *modified.borrow();
@@ -124,6 +124,7 @@ mod tests {
         let modified = RefCell::new(false);
         add_to_container(Container::new(), |container| {
             container.try_resolve::<(Dynamic<TestService>,)>(&|t| {
+                assert_eq!(*t.i0().a, 42);
                 *modified.borrow_mut() = true;
             });
         });
@@ -166,8 +167,8 @@ mod tests {
             
             move|c| {
                 c.add(&DynamicResolver::new(&move|(), resolve| {
-                    let a = &10;
-                    let b: &i32 = &42;
+                    let a = &42;
+                    let b: &i32 = &10;
                     
                     resolve(&TestService{ a, b });
                 }), next)
@@ -175,8 +176,8 @@ mod tests {
         );  
     }
 
-    struct TestService<'a> {
-        a: &'a i32,
-        b: &'a i32
+    pub struct TestService<'a> {
+        pub a: &'a i32,
+        pub b: &'a i32
     }
 }
