@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub mod ref_list;
 
 pub struct Container<'a> {
-    // bool ist just a placeholder
+    // bool ist just a placeholder for the type to be resolved
     data: HashMap<TypeId, *const DynamicResolver<'a, bool>>
 }
 
@@ -49,7 +49,7 @@ impl<T: Any> Resolvable for Dynamic<T> {
     fn resolve(container: &Container, callback: &dyn Fn(&Self::Result)) {
         if let Some(tmp) = container.data.get(&TypeId::of::<T>()) {
             let reference = *tmp as *const DynamicResolver<T>;
-            (unsafe{ &*reference }.factory)((), &|value| {
+            unsafe{ &*reference }.resolve(&|value| {
                 (callback)(value);
             });
         }
@@ -77,12 +77,22 @@ impl<'a> Container<'a> {
 }
 
 pub struct DynamicResolver<'a, T> {
-    factory: &'a dyn Fn((), &dyn Fn(&T))
+    factory: &'a dyn Fn(&(), &dyn Fn(&T))
 }
 
 impl<'a, T> DynamicResolver<'a, T> {
-    pub fn new(factory: &'a dyn Fn((), &dyn Fn(&T))) -> Self {
+    pub fn new(factory: &'a dyn Fn(&(), &dyn Fn(&T))) -> Self {
         Self { factory }
+    }
+}
+
+trait DynamicResolverTrait<'a, T> {
+    fn resolve(&self, callback: &dyn Fn(&T));
+}
+
+impl<'a, T: Any> DynamicResolverTrait<'a, T> for DynamicResolver<'a, T> {
+    fn resolve(&self, callback: &dyn Fn(&T)) {
+        (self.factory)(&(), callback);
     }
 }
 
@@ -145,21 +155,21 @@ mod tests {
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
         container.add(
-            &DynamicResolver::new(&move|(), v| {       
+            &DynamicResolver::new(&move|(), resolve| {       
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
                 }        
                 
-                v(outer.borrow().as_ref().unwrap());
+                resolve(outer.borrow().as_ref().unwrap());
             }),
             
             move|c| {
-                c.add(&DynamicResolver::new(&move|(), v| {
+                c.add(&DynamicResolver::new(&move|(), resolve| {
                     let a = &10;
                     let b: &i32 = &42;
                     
-                    v(&TestService{ a, b });
+                    resolve(&TestService{ a, b });
                 }), next)
             }
         );  
