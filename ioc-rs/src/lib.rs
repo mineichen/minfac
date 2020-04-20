@@ -4,6 +4,7 @@ use core::{
 };
 use std::collections::HashMap;
 
+pub mod builder;
 pub mod ref_list;
 
 pub struct Container<'a> {
@@ -62,7 +63,7 @@ impl<'a> Container<'a> {
         }
     }
 
-    pub fn add<TDependency, T, TFactory, TNext>(mut self, factory: TFactory , next: TNext) 
+     fn add<TDependency, T, TFactory, TNext>(mut self, factory: TFactory , next: TNext) 
         where TDependency: Resolvable, 
             T: Any, 
             TNext: FnOnce(Self), 
@@ -82,51 +83,6 @@ impl<'a> Container<'a> {
 
     pub fn try_resolve<T: Resolvable>(&'a self, callback: &dyn Fn(&T::Result)) {
         T::resolve(&self, callback);
-    }
-}
-
-pub struct ResolvableBuilder<TFn: FnOnce(Container<'_>)>(TFn);
-
-impl ResolvableBuilder<fn(Container<'_>)> {
-    
-}
-
-impl<TFn: FnOnce(Container<'_>)> ResolvableBuilder<TFn> {    
-    pub fn new(tfn: TFn) -> ResolvableBuilder<TFn> {
-        ResolvableBuilder(tfn)
-    }
-    pub fn with_dependency<T: Resolvable>(self) -> TypedResolvableBuilder<impl FnOnce(Container<'_>), T> {
-        TypedResolvableBuilder::<_, T> {
-            next: self.0,
-            dependency: PhantomData::<T>
-        }
-    }
-    pub fn add<T: Any, TFactory: Fn(&dyn Fn(&T))>(self, factory: TFactory) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
-        ResolvableBuilder(|container| {
-            container.add::<(), _, _, _>(
-                move|(), resolve| factory(resolve), 
-                self.0
-            )
-        })
-    }
-    pub fn append_to(self, c: Container) {
-        (self.0)(c);
-    }
-}
-
-pub struct TypedResolvableBuilder<TFn: FnOnce(Container<'_>), T: Resolvable> {
-    next: TFn,
-    dependency: PhantomData<T>
-}
-
-impl<TFn: FnOnce(Container<'_>), TResolvable: Resolvable> TypedResolvableBuilder<TFn, TResolvable> {   
-    pub fn add<T: Any, TFactory: Fn(&TResolvable::Result, &dyn Fn(&T))>(self, factory: TFactory) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
-        ResolvableBuilder(|container| {
-            container.add::<TResolvable, _, _, _>(
-                factory, 
-                self.next
-            )
-        })
     }
 }
 
@@ -199,7 +155,7 @@ mod tests {
     #[test]
     fn resolve_dynamic_with_dependency() {
         let modified = RefCell::new(false);
-        ResolvableBuilder::new(|c| { 
+        builder::ResolvableBuilder::new(|c| { 
                 c.try_resolve::<Dynamic<f32>>(&|number| {
                     *modified.borrow_mut() = true;
                     assert_eq!(63f32, *number, "42 * 1.5 = 63");
@@ -214,12 +170,12 @@ mod tests {
         assert!(was_resolved);
     }
 
-    fn get_definitions<TNext: FnOnce(Container)>(next: TNext) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
+    fn get_definitions<TNext: FnOnce(Container)>(next: TNext) -> builder::ResolvableBuilder<impl FnOnce(Container<'_>)> {
         // OnceCell would be much more appropriate, because RefCell fails at runtime 
         // (e.g. get_or_insert() fails the second time because a immutable reference exists, even though it wouldn't change the data twice)
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
-        ResolvableBuilder::new(next)
+        builder::ResolvableBuilder::new(next)
             .add(|resolve| { resolve(&TestService {a: &42, b: &10})})
             .add(move |resolve| {
                 if outer.borrow().is_none()  {

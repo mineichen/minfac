@@ -33,7 +33,6 @@ mod tests {
     #[test]
     fn list_test() {
         let option_list = RefList::<i32>::Some(10, &RefList::<i32>::None());
-
         assert!(1 == option_list.iter().count());
     }
 }
