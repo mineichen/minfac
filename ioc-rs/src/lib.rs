@@ -68,19 +68,65 @@ impl<'a> Container<'a> {
             TNext: FnOnce(Self), 
             TFactory: Fn(&TDependency::Result, &dyn Fn(&T))
     {
-        let ctx = &DynamicResolver::new(
-            &|c: &Container, cb: &dyn Fn(&T)| { 
-                TDependency::resolve(c, |c| {
-                    factory(c, cb)
-                });
-            }
-        ) as *const DynamicResolver<T> as *const DynamicResolver<bool>;
-        self.data.insert(TypeId::of::<T>(),ctx);
+        self.data.insert(
+            TypeId::of::<T>(),
+            &DynamicResolver::new(
+                &|c: &Container, cb: &dyn Fn(&T)| { 
+                    TDependency::resolve(c, |c| {
+                        factory(c, cb)
+                    });
+                }
+            ) as *const DynamicResolver<T> as *const DynamicResolver<bool>);
         next(self);
     }
 
     pub fn try_resolve<T: Resolvable>(&'a self, callback: &dyn Fn(&T::Result)) {
         T::resolve(&self, callback);
+    }
+}
+
+pub struct ResolvableBuilder<TFn: FnOnce(Container<'_>)>(TFn);
+
+impl ResolvableBuilder<fn(Container<'_>)> {
+    
+}
+
+impl<TFn: FnOnce(Container<'_>)> ResolvableBuilder<TFn> {    
+    pub fn new(tfn: TFn) -> ResolvableBuilder<TFn> {
+        ResolvableBuilder(tfn)
+    }
+    pub fn with_dependency<T: Resolvable>(self) -> TypedResolvableBuilder<impl FnOnce(Container<'_>), T> {
+        TypedResolvableBuilder::<_, T> {
+            next: self.0,
+            dependency: PhantomData::<T>
+        }
+    }
+    pub fn add<T: Any, TFactory: Fn(&dyn Fn(&T))>(self, factory: TFactory) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
+        ResolvableBuilder(|container| {
+            container.add::<(), _, _, _>(
+                move|(), resolve| factory(resolve), 
+                self.0
+            )
+        })
+    }
+    pub fn append_to(self, c: Container) {
+        (self.0)(c);
+    }
+}
+
+pub struct TypedResolvableBuilder<TFn: FnOnce(Container<'_>), T: Resolvable> {
+    next: TFn,
+    dependency: PhantomData<T>
+}
+
+impl<TFn: FnOnce(Container<'_>), TResolvable: Resolvable> TypedResolvableBuilder<TFn, TResolvable> {   
+    pub fn add<T: Any, TFactory: Fn(&TResolvable::Result, &dyn Fn(&T))>(self, factory: TFactory) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
+        ResolvableBuilder(|container| {
+            container.add::<TResolvable, _, _, _>(
+                factory, 
+                self.next
+            )
+        })
     }
 }
 
@@ -121,12 +167,12 @@ mod tests {
     #[test]
     fn resolve_single_struct() {
         let modified = RefCell::new(false);
-        add_to_container(Container::new(), |container| {
+        get_definitions( |container| {
             container.try_resolve::<(Dynamic<TestService>,)>(&|t| {
                 assert_eq!(*t.i0().a, 42);
                 *modified.borrow_mut() = true;
             });
-        });
+        }).append_to(Container::new());
         
         let was_resolved = *modified.borrow();
         assert!(was_resolved);
@@ -136,15 +182,16 @@ mod tests {
     fn resolve_dynamic_twice_results() {
         let modified = RefCell::new(false);
         let stack = &modified as *const RefCell<bool> as usize;
-        add_to_container(Container::new(), |w| {
-             w.try_resolve::<Dynamic::<Instant>>(&|first| {
+        get_definitions(|w| {
+            w.try_resolve::<Dynamic::<Instant>>(&|first| {
                 w.try_resolve::<Dynamic::<Instant>>( &|second| {
                     *modified.borrow_mut() = true;
                     println!("Stacksize: {}", stack - second as *const Instant as usize);
                     assert!(*first == *second);
                 });
             });
-        });
+        }).append_to(Container::new());
+       
         let was_resolved = *modified.borrow();
         assert!(was_resolved);
     }
@@ -152,44 +199,36 @@ mod tests {
     #[test]
     fn resolve_dynamic_with_dependency() {
         let modified = RefCell::new(false);
-        add_to_container(Container::new(), |c| {
-            c.add::<Dynamic<TestService>, _, _, _>(move|test_service, resolve| {
-                resolve(&(1.5 * (*test_service.a as f32)));
-            }, |c| {
+        ResolvableBuilder::new(|c| { 
                 c.try_resolve::<Dynamic<f32>>(&|number| {
                     *modified.borrow_mut() = true;
                     assert_eq!(63f32, *number, "42 * 1.5 = 63");
                 });
-            });
-        });
+            })    
+            .add(|resolve| resolve(&42))
+            .with_dependency::<Dynamic<i32>>().add(|dep, resolve| resolve(&(1.5 * (*dep as f32))))
+            .append_to(Container::new());
+
+        
         let was_resolved = *modified.borrow();
         assert!(was_resolved);
     }
 
-    fn add_to_container<TNext: FnOnce(Container)>(container: Container, next: TNext) {
+    fn get_definitions<TNext: FnOnce(Container)>(next: TNext) -> ResolvableBuilder<impl FnOnce(Container<'_>)> {
         // OnceCell would be much more appropriate, because RefCell fails at runtime 
         // (e.g. get_or_insert() fails the second time because a immutable reference exists, even though it wouldn't change the data twice)
         let outer: RefCell<Option<Instant>> = RefCell::new(None);
         
-        container.add::<(),_,_,_>(
-            move|(), resolve| {       
+        ResolvableBuilder::new(next)
+            .add(|resolve| { resolve(&TestService {a: &42, b: &10})})
+            .add(move |resolve| {
                 if outer.borrow().is_none()  {
                     *outer.borrow_mut() = Some(Instant::now());
                     thread::sleep(Duration::from_millis(10));  
                 }        
                 
                 resolve(outer.borrow().as_ref().unwrap());
-            },
-            
-            move|c| {
-                c.add::<(),_,_,_>(move|_, resolve| {
-                    let a = &42;
-                    let b: &i32 = &10;
-                    
-                    resolve(&TestService{ a, b });
-                }, next)
-            }
-        );  
+            })
     }
 
     pub struct TestService<'a> {
