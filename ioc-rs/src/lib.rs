@@ -31,11 +31,63 @@ impl<T> RefTuple<T> {
     }
 }
 
-impl<T1: Resolvable> Resolvable for (T1,) {
-    type Result = RefTuple<T1::Result>;
+pub struct RefTuple2<T, U>(*const T, *const U);
+impl<T, U> RefTuple2<T, U> {
+    pub fn i0(&self) -> &T {
+        unsafe {&*self.0}
+    }
+    pub fn i1(&self) -> &U {
+        unsafe {&*self.1}
+    }
+}
+pub struct RefTuple3<T, U, V>(*const T, *const U, *const V);
+impl<T, U, V> RefTuple3<T, U, V> {
+    pub fn i0(&self) -> &T {
+        unsafe {&*self.0}
+    }
+    pub fn i1(&self) -> &U {
+        unsafe {&*self.1}
+    }
+    pub fn i2(&self) -> &V {
+        unsafe {&*self.2}
+    }
+}
+
+pub struct RefTuple4<T, U, V, W>(*const T, *const U, *const V, *const W);
+impl<T, U, V, W> RefTuple4<T, U, V, W> {
+    pub fn i0(&self) -> &T {
+        unsafe {&*self.0}
+    }
+    pub fn i1(&self) -> &U {
+        unsafe {&*self.1}
+    }
+    pub fn i2(&self) -> &V {
+        unsafe {&*self.2}
+    }
+    pub fn i3(&self) -> &W {
+        unsafe {&*self.3}
+    }
+}
+
+impl<T0: Resolvable> Resolvable for (T0,) {
+    type Result = RefTuple<T0::Result>;
     fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn) {
-        T1::resolve(container,|t1| {
-            callback(&RefTuple(t1 as *const T1::Result) );
+        T0::resolve(container,|t0| {
+            callback(&RefTuple(t0 as *const T0::Result) );
+        });
+    }
+}
+
+impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
+    type Result = RefTuple2<T0::Result, T1::Result>;
+    fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn) {
+        T0::resolve(container, |t0| {
+            T1::resolve(container,|t1| {
+                callback(&RefTuple2(
+                    t0 as *const T0::Result, 
+                    t1 as *const T1::Result
+                ));
+            });
         });
     }
 }
@@ -139,12 +191,10 @@ mod tests {
         let modified = RefCell::new(false);
         let stack = &modified as *const RefCell<bool> as usize;
         get_definitions(|w| {
-            w.try_resolve::<Dynamic::<Instant>>(&|first| {
-                w.try_resolve::<Dynamic::<Instant>>( &|second| {
-                    *modified.borrow_mut() = true;
-                    println!("Stacksize: {}", stack - second as *const Instant as usize);
-                    assert!(*first == *second);
-                });
+            w.try_resolve::<(Dynamic::<Instant>, Dynamic::<Instant>)>(&|tuple| {
+                *modified.borrow_mut() = true;
+                println!("Stacksize: {}", stack - tuple.i1() as *const Instant as usize);
+                assert!(*tuple.i0() == *tuple.i1());
             });
         }).append_to(Container::new());
        

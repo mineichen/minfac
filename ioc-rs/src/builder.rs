@@ -44,3 +44,7 @@ impl<TFn: FnOnce(Container<'_>), TResolvable: Resolvable> TypedResolvableBuilder
         })
     }
 }
+
+pub struct ContextResolvableBuilder {
+    
+}
