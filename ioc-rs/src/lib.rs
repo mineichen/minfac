@@ -12,6 +12,26 @@ pub struct Container<'a> {
     data: HashMap<TypeId, *const DynamicResolver<'a, bool>>
 }
 
+trait DynamicContainer {
+    fn insert<T: Any>(&mut self, data: &DynamicResolver<T>);
+    fn get<T: Any>(&self) -> Option<&DynamicResolver<T>>;
+}
+
+impl<'a> DynamicContainer for Container<'a> {
+    fn insert<T: Any>(&mut self, data: &DynamicResolver<T>) {
+        self.data.insert( 
+            TypeId::of::<T>(),
+            data as *const DynamicResolver<T> as *const DynamicResolver<bool>
+        );
+    }
+    fn get<T: Any>(&self) -> Option<&DynamicResolver<'_, T>> {
+        self.data.get(&TypeId::of::<T>()).map(|r| {
+            let c = *r as *const DynamicResolver<T>;
+            unsafe{ &* c }
+        })
+    }
+}
+
 pub trait Resolvable {
     type Result; 
     fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn);
@@ -99,12 +119,9 @@ pub struct Dynamic<T: Any> {
 impl<T: Any> Resolvable for Dynamic<T> {
     type Result = T;
     fn resolve<TFn: Fn(&Self::Result)>(container: &Container, callback: TFn) {
-        if let Some(tmp) = container.data.get(&TypeId::of::<T>()) {
-            let reference = *tmp as *const DynamicResolver<T>;
-            (unsafe{ &*reference }.factory)(container, &|value| {
-                 (callback)(value);
-            });
-        }
+        (container.get::<T>().unwrap().factory)(container, &|value| {
+            (callback)(value);
+        });
     }
 }
 
@@ -121,15 +138,15 @@ impl<'a> Container<'a> {
             TNext: FnOnce(Self), 
             TFactory: Fn(&TDependency::Result, &dyn Fn(&T))
     {
-        self.data.insert(
-            TypeId::of::<T>(),
+        self.insert(
             &DynamicResolver::new(
                 &|c: &Container, cb: &dyn Fn(&T)| { 
                     TDependency::resolve(c, |c| {
                         factory(c, cb)
                     });
-                }
-            ) as *const DynamicResolver<T> as *const DynamicResolver<bool>);
+                } 
+            )
+        );
         next(self);
     }
 

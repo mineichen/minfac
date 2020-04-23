@@ -52,8 +52,8 @@ mod tests {
 
     #[test]
     fn list_add() {
-        let mut option_list = OptionRefList::Some(10, &OptionRefList::None());
-        let mut extended_list = option_list.prepend(10);
+        let option_list = OptionRefList::Some(10, &OptionRefList::None());
+        let extended_list = option_list.prepend(10);
         assert_eq!(2, extended_list.iter().count());
     }
 }
