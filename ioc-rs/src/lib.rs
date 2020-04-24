@@ -1,34 +1,42 @@
-use core::{
-    any::{Any, TypeId},
-    marker::PhantomData
+use {
+    core::{
+        any::{Any, TypeId},
+        marker::PhantomData
+    },
+    std::collections::HashMap,
+    ref_list::{Collection, OptionRefList}
 };
-use std::collections::HashMap;
 
 pub mod builder;
 pub mod ref_list;
 
 pub struct Container<'a> {
     // bool ist just a placeholder for the type to be resolved
-    data: HashMap<TypeId, *const DynamicResolver<'a, bool>>
+    data: HashMap<TypeId, *const OptionRefList<'a, *const DynamicResolver<'a, bool>>>
 }
 
 trait DynamicContainer {
-    fn insert<T: Any>(&mut self, data: &DynamicResolver<T>);
+    fn insert<T: Any>(&mut self, data: &OptionRefList<*const DynamicResolver<T>>);
     fn get<T: Any>(&self) -> Option<&DynamicResolver<T>>;
 }
 
 impl<'a> DynamicContainer for Container<'a> {
-    fn insert<T: Any>(&mut self, data: &DynamicResolver<T>) {
+    fn insert<T: Any>(&mut self, data: &OptionRefList<*const DynamicResolver<T>>) {
         self.data.insert( 
             TypeId::of::<T>(),
-            data as *const DynamicResolver<T> as *const DynamicResolver<bool>
+            data as *const OptionRefList<*const DynamicResolver<T>> as *const OptionRefList<*const DynamicResolver<bool>>
         );
     }
     fn get<T: Any>(&self) -> Option<&DynamicResolver<'_, T>> {
-        self.data.get(&TypeId::of::<T>()).map(|r| {
-            let c = *r as *const DynamicResolver<T>;
-            unsafe{ &* c }
-        })
+        match self.data.get(&TypeId::of::<T>()) {
+            Some(r_list) => {
+                let a: &OptionRefList<*const DynamicResolver<bool>> = unsafe { &**r_list };
+                let r = a.iter().next().unwrap();
+                let c = *r as *const DynamicResolver<T>;
+                Some(unsafe{ &* c })
+            },
+            None => None
+        }
     }
 }
 
@@ -138,13 +146,16 @@ impl<'a> Container<'a> {
             TNext: FnOnce(Self), 
             TFactory: Fn(&TDependency::Result, &dyn Fn(&T))
     {
+
         self.insert(
-            &DynamicResolver::new(
-                &|c: &Container, cb: &dyn Fn(&T)| { 
-                    TDependency::resolve(c, |c| {
-                        factory(c, cb)
-                    });
-                } 
+            &OptionRefList::new(
+                &DynamicResolver::new(
+                    &|c: &Container, cb: &dyn Fn(&T)| { 
+                        TDependency::resolve(c, |c| {
+                            factory(c, cb)
+                        });
+                    }
+                )
             )
         );
         next(self);

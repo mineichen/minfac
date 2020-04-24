@@ -1,7 +1,10 @@
-pub trait RefList<'a, T: 'a> {
+pub trait Collection<'a, T: 'a> {
     type Iterator: Iterator<Item=&'a T>;
 
     fn iter(&'a self) -> Self::Iterator;
+}
+
+pub trait RefList<'a, T: 'a> {
     fn prepend(&'a self, value: T) -> Self;
 }
 
@@ -10,14 +13,19 @@ pub enum OptionRefList<'a, T> {
     None()
 }
 
-
-
-impl<'a, T> RefList<'a, T> for OptionRefList<'a, T> {
-    //type ItemType = OptionRefList<'a, T>;
+impl<'a, T> OptionRefList<'a, T> {
+    pub fn new(item: T) -> Self {
+        OptionRefList::Some(item, &OptionRefList::None())
+    }
+}
+impl<'a, T> Collection<'a, T> for OptionRefList<'a, T> {
     type Iterator = RefListIterator<'a, T>;
     fn iter(&'a self) -> RefListIterator<'a, T> {
         RefListIterator(self)
     }
+}
+
+impl<'a, T> RefList<'a, T> for OptionRefList<'a, T> {
     fn prepend(&'a self, value: T) -> Self {
         OptionRefList::Some(value, self)
     }
