@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "interface",
+    "plugin",
+    "runtime",
+]

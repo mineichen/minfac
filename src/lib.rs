@@ -53,13 +53,13 @@ impl<'a, T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> FamilyL
 pub trait Resolvable: Any {
     type Item: for<'a> FamilyLt<'a>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out>;
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out>;
 }
 
 impl Resolvable for () {
     type Item = IdFamily<()>;
 
-    fn resolve<'s>(_: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(_: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some(())
     }
 }
@@ -67,14 +67,14 @@ impl Resolvable for () {
 impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type Item = T2Family<T0, T1>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some((T0::resolve(container).unwrap(), T1::resolve(container).unwrap()))
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
     type Item = T3Family<T0, T1, T2>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some((
             T0::resolve(container).unwrap(), 
             T1::resolve(container).unwrap(),
@@ -85,7 +85,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable for (T0, T1, T2, T3) {
     type Item = T4Family<T0, T1, T2, T3>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some((
             T0::resolve(container).unwrap(), 
             T1::resolve(container).unwrap(),
@@ -107,43 +107,47 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for R2<T0, T1> {
     }
 }*/
 
-impl Resolvable for Container {
-    type Item = RefFamily<Container>;
+impl Resolvable for GenericContainer {
+    type Item = RefFamily<GenericContainer>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some(container)
     }
 }
-struct DynamicRef<T: Any>(PhantomData<T>);
+pub struct DynamicRef<T: Any>(PhantomData<T>);
 impl<T: Any> Resolvable for DynamicRef<T> {
     type Item = RefFamily<T>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         container.resolve_registered::<Self>()
     }
 }
 
-struct DynamicId<T: Any>(PhantomData<T>);
+pub struct DynamicId<T: Any>(PhantomData<T>);
 impl<T: Any> Resolvable for DynamicId<T> {
     type Item = IdFamily<T>;
 
-    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+    fn resolve<'s>(container: &'s GenericContainer) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         container.resolve_registered::<Self>()
     }
 }
 
-pub struct Container {
+pub trait Container {
+    fn get<'s, T: Resolvable>(&'s self) -> Option<<T::Item as FamilyLt<'s>>::Out>;
+}
+
+pub struct GenericContainer {
     producers: HashMap<TypeId, *const dyn Fn()>,
 }
 
-impl Container {
+impl GenericContainer {
     pub fn new() -> Self {
         Self {
             producers: HashMap::new()
         }
     }
 } 
-impl Container {
+impl GenericContainer {
     pub fn get<'s, T: Resolvable>(&'s self) -> Option<<T::Item as FamilyLt<'s>>::Out> {
         // if TypeId::of::<DynamicRef<Container>>() == TypeId::of::<T>() {
         //     let i = unsafe {std::mem::transmute::<&'s Self, <T::Item as FamilyLt<'s>>::Out>(self)};
@@ -156,14 +160,14 @@ impl Container {
         self.producers
             .get(&TypeId::of::<T>())
             .map(|f| {                
-                let func_ptr = *f as *const dyn Fn(&Container) -> <T::Item as FamilyLt<'s>>::Out;
+                let func_ptr = *f as *const dyn Fn(&GenericContainer) -> <T::Item as FamilyLt<'s>>::Out;
                 let func = unsafe { &* func_ptr};
                 
                 (func)(&self)
             })
     }
     pub fn register_id<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::Item as FamilyLt<'a>>::Out) -> T) {
-        let func : Box<dyn Fn(&'a Container) -> T> = Box::new(move |container: &'a Container| {
+        let func : Box<dyn Fn(&'a GenericContainer) -> T> = Box::new(move |container: &'a GenericContainer| {
             let arg = TDependency::resolve(container);
             creator(arg.unwrap())
         });
@@ -175,7 +179,7 @@ impl Container {
     }
     pub fn register_ref<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::Item as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
-        let func : Box<dyn Fn(&'a Container) -> &T> = Box::new(move |container: &'a Container| { 
+        let func : Box<dyn Fn(&'a GenericContainer) -> &T> = Box::new(move |container: &'a GenericContainer| { 
             unsafe { 
                 // Deref is valid because container cannot delete any producers
                 // Unless destroying itself
@@ -199,9 +203,9 @@ mod tests {
    
     #[test]
     fn resolve_test() {
-        let mut container = Container::new();
+        let mut container = GenericContainer::new();
         container.register_id::<(), _>(|_| 42);
-        container.register_ref::<Container,_>(|_| 42);
+        container.register_ref::<GenericContainer,_>(|_| 42);
 
         assert_eq!(
             DynamicId::<i32>::resolve(&container).unwrap(), 
@@ -211,25 +215,25 @@ mod tests {
 
     #[test]
     fn get_registered_dynamic_id() {
-        let mut container = Container::new();
+        let mut container = GenericContainer::new();
         container.register_id::<(),_>(|_| 42);
         assert_eq!(Some(42i32), container.get::<DynamicId<i32>>());
     }
     #[test]
     fn get_registered_dynamic_ref() {
-        let mut container = Container::new();
+        let mut container = GenericContainer::new();
         container.register_ref::<(), i32>(|_| 42);
         assert_eq!(Some(&42i32), container.get::<DynamicRef<i32>>());
     }
     #[test]
     fn get_unkown_returns_none() {
-        let container = Container::new();
+        let container = GenericContainer::new();
         assert_eq!(None, container.get::<DynamicId<i32>>());
     }
 
     #[test]
     fn resolve_tuple_2() {
-        let mut container = Container::new();
+        let mut container = GenericContainer::new();
         container.register_id::<(), i32>(|_| 32);
         container.register_ref::<(), i64>(|_| 64);
         assert_eq!(Some((32, &64)), container.get::<(DynamicId<i32>, DynamicRef<i64>)>());
@@ -237,8 +241,8 @@ mod tests {
 
     #[test]
     fn register_struct_as_dynamic() {
-        let mut container = Container::new();        
-        container.register_ref::<Container, _>(|_| ServiceImpl(42));
+        let mut container = GenericContainer::new();        
+        container.register_ref::<(), _>(|_| ServiceImpl(42));
         container.register_id::<DynamicRef<ServiceImpl>, _>(|c| c as &dyn Service);
         let service = container
             .get::<DynamicId<&dyn Service>>()

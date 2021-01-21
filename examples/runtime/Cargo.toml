@@ -1,8 +1,10 @@
 [package]
-name = "ioc-rs"
+name = "runtime"
 version = "0.0.1"
 authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-once_cell = "1.5" 
+ioc-rs = { path = "../../" }
+interface = { path = "../interface" } 
+libloading = "0.6"

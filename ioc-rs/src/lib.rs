@@ -9,7 +9,6 @@ use {
 
 pub mod builder;
 pub mod ref_list;
-pub mod gat;
 
 pub struct Container<'a> {
     // bool ist just a placeholder for the type to be resolved
