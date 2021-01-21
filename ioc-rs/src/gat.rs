@@ -24,31 +24,31 @@ impl<'a, T: 'a + Any> FamilyLt<'a> for RefFamily<T> {
 #[derive(Debug)]
 pub struct T2Family<T0: Resolvable, T1: Resolvable>(PhantomData<(T0, T1)>);
 impl<'a, T0: Resolvable, T1: Resolvable> FamilyLt<'a> for T2Family<T0, T1> {
-    type Out = (<T0::Item as FamilyLt<'a>>::Out, <T1::Item as FamilyLt<'a>>::Out);
+    type Out = (
+        <T0::Item as FamilyLt<'a>>::Out,
+        <T1::Item as FamilyLt<'a>>::Out
+    );
+}
+#[derive(Debug)]
+pub struct T3Family<T0: Resolvable, T1: Resolvable, T2: Resolvable>(PhantomData<(T0, T1, T2)>);
+impl<'a, T0: Resolvable, T1: Resolvable, T2: Resolvable> FamilyLt<'a> for T3Family<T0, T1, T2> {
+    type Out = (
+        <T0::Item as FamilyLt<'a>>::Out, 
+        <T1::Item as FamilyLt<'a>>::Out, 
+        <T2::Item as FamilyLt<'a>>::Out
+    );
 }
 
-
-/*
-pub trait LifetimeResolvable<'a>: Any {
-    type Item: 'a;
-    fn resolve(container: &'a Container) -> Self::Item;
+#[derive(Debug)]
+pub struct T4Family<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable>(PhantomData<(T0, T1, T2, T3)>);
+impl<'a, T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> FamilyLt<'a> for T4Family<T0, T1, T2, T3> {
+    type Out = (
+        <T0::Item as FamilyLt<'a>>::Out, 
+        <T1::Item as FamilyLt<'a>>::Out, 
+        <T2::Item as FamilyLt<'a>>::Out, 
+        <T3::Item as FamilyLt<'a>>::Out
+    );
 }
-
-impl<'a> LifetimeResolvable<'a> for Container {
-    type Item = &'a Container;
-
-    fn resolve(container: &'a Container) -> Self::Item {
-        container
-    }
-}
-
-impl<'a, T: 'static> LifetimeResolvable<'a> for DynamicId<T> {
-    type Item = T;
-
-    fn resolve(container: &'a Container) -> Self::Item {
-        todo!()
-    }
-}*/
 
 pub trait Resolvable: Any {
     type Item: for<'a> FamilyLt<'a>;
@@ -69,6 +69,29 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
 
     fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
         Some((T0::resolve(container).unwrap(), T1::resolve(container).unwrap()))
+    }
+}
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
+    type Item = T3Family<T0, T1, T2>;
+
+    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+        Some((
+            T0::resolve(container).unwrap(), 
+            T1::resolve(container).unwrap(),
+            T2::resolve(container).unwrap()
+        ))
+    }
+}
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable for (T0, T1, T2, T3) {
+    type Item = T4Family<T0, T1, T2, T3>;
+
+    fn resolve<'s>(container: &'s Container) -> Option<<Self::Item as FamilyLt<'s>>::Out> {
+        Some((
+            T0::resolve(container).unwrap(), 
+            T1::resolve(container).unwrap(),
+            T2::resolve(container).unwrap(),
+            T3::resolve(container).unwrap()
+        ))
     }
 }
 /*
