@@ -2,8 +2,7 @@ use {
     core::{
         marker::PhantomData,
         any::{Any, TypeId}
-    },
-    std::collections::HashMap
+    }
 };
 // The family trait for type constructors that have one input lifetime.
 pub trait FamilyLt<'a> {
@@ -121,18 +120,17 @@ impl<T: Any> Resolvable for DynamicId<T> {
 }
 
 pub struct ServiceProvider {
-    //producers: Vec<(TypeId, *const dyn Fn())>
-    producers: HashMap<TypeId, *const dyn Fn()>,
+    producers: Vec<(TypeId, *const dyn Fn())>
 }
 
 pub struct ServiceCollection {
-    producers: HashMap<TypeId, *const dyn Fn()>,
+    producers: Vec<(TypeId, *const dyn Fn())>,
 }
 
 impl ServiceCollection {
     pub fn new() -> Self {
         Self {
-            producers: HashMap::new()
+            producers: Vec::new()
         }
     }
 } 
@@ -148,9 +146,10 @@ impl ServiceProvider {
     /// Might return Some() for DynamicRef or DynamicId. Others Resolvables are not dynamic
     fn resolve_registered<'s, T: Resolvable>(&'s self) -> Option<<T::Item as FamilyLt<'s>>::Out> {
         self.producers
-            .get(&TypeId::of::<T>())
+            .binary_search_by_key(&TypeId::of::<T>(), |(id, _)| *id)
+            .ok()
             .map(|f| {                
-                let func_ptr = *f as *const dyn Fn(&ServiceProvider) -> <T::Item as FamilyLt<'s>>::Out;
+                let func_ptr = unsafe { self.producers.get_unchecked(f)}.1 as *const dyn Fn(&ServiceProvider) -> <T::Item as FamilyLt<'s>>::Out;
                 let func = unsafe { &* func_ptr};
                 
                 (func)(&self)
@@ -159,18 +158,16 @@ impl ServiceProvider {
 }
 
 impl ServiceCollection {
-    
-    
     pub fn register_id<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::Item as FamilyLt<'a>>::Out) -> T) {
         let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |container: &'a ServiceProvider| {
             let arg = TDependency::resolve(container);
             creator(arg.unwrap())
         });
         
-        self.producers.insert(
+        self.producers.push((
             TypeId::of::<DynamicId<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
-        );
+        ));
     }
     pub fn register_ref<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::Item as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
@@ -185,13 +182,13 @@ impl ServiceCollection {
             }
         });
         
-        self.producers.insert(
+        self.producers.push((
             TypeId::of::<DynamicRef<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
-        );
+        ));
     }
-    pub fn build(self) -> ServiceProvider {
-        //self.producers.
+    pub fn build(mut self) -> ServiceProvider {
+        self.producers.sort_by_key(|(id,_)| *id);
         ServiceProvider { producers: self.producers}
     }
 }
