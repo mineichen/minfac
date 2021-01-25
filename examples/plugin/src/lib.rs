@@ -1,4 +1,3 @@
-use ioc_rs::DynamicRef;
 struct PluginService;
 
 impl interface::Service for PluginService {
@@ -11,6 +10,7 @@ impl interface::Service for PluginService {
 #[no_mangle]
 pub fn register(container: &mut ioc_rs::ServiceCollection) {
     println!("plugin: Register Service");
-    container.register_ref::<(), _>(|_| PluginService);
-    container.register_id::<DynamicRef<PluginService>, _>(|c| c as &dyn interface::Service);
+    container.register_singleton::<(), _>(|_| PluginService);
+    container.register_transient::<ioc_rs::Singleton<PluginService>, _>(|c| c as &dyn interface::Service);
+    container.register_transient::<ioc_rs::Transient<i32>, _>(|i| i as i64 * 3);
 }
