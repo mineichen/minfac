@@ -26,32 +26,26 @@ impl<'a, T: 'a + Any> FamilyLt<'a> for RefFamily<T> {
 impl<'a, T: FamilyLt<'a>> FamilyLt<'a> for Option<T> {
     type Out = Option<T::Out>;
 }
-#[derive(Debug)]
-pub struct T2Family<T0: Resolvable, T1: Resolvable>(PhantomData<(T0, T1)>);
-impl<'a, T0: Resolvable, T1: Resolvable> FamilyLt<'a> for T2Family<T0, T1> {
-    type Out = (
-        <T0::Item as FamilyLt<'a>>::Out,
-        <T1::Item as FamilyLt<'a>>::Out
-    );
-}
-#[derive(Debug)]
-pub struct T3Family<T0: Resolvable, T1: Resolvable, T2: Resolvable>(PhantomData<(T0, T1, T2)>);
-impl<'a, T0: Resolvable, T1: Resolvable, T2: Resolvable> FamilyLt<'a> for T3Family<T0, T1, T2> {
-    type Out = (
-        <T0::Item as FamilyLt<'a>>::Out, 
-        <T1::Item as FamilyLt<'a>>::Out, 
-        <T2::Item as FamilyLt<'a>>::Out
-    );
-}
 
-#[derive(Debug)]
-pub struct T4Family<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable>(PhantomData<(T0, T1, T2, T3)>);
-impl<'a, T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> FamilyLt<'a> for T4Family<T0, T1, T2, T3> {
+impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>> FamilyLt<'a> for (T0, T1) {
     type Out = (
-        <T0::Item as FamilyLt<'a>>::Out, 
-        <T1::Item as FamilyLt<'a>>::Out, 
-        <T2::Item as FamilyLt<'a>>::Out, 
-        <T3::Item as FamilyLt<'a>>::Out
+        T0::Out,
+        T1::Out
+    );
+}
+impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>> FamilyLt<'a> for (T0, T1, T2) {
+    type Out = (
+        T0::Out,
+        T1::Out,
+        T2::Out
+    );
+}
+impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>> FamilyLt<'a> for (T0, T1, T2, T3) {
+    type Out = (
+        T0::Out,
+        T1::Out,
+        T2::Out,
+        T3::Out
     );
 }
 
@@ -76,35 +70,31 @@ impl Resolvable for () {
 }
 
 impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
-    type Item = T2Family<T0, T1>;
-    type ItemPreChecked = T2Family<T0, T1>;
+    type Item = (T0::Item, T1::Item);
+    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
   
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         (T0::resolve(container), T1::resolve(container))
     }
   
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        Self::resolve(container)
+        (T0::resolve_prechecked(container), T1::resolve_prechecked(container))
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
-    type Item = T3Family<T0, T1, T2>;
-    type ItemPreChecked = T3Family<T0, T1, T2>;
+    type Item = (T0::Item, T1::Item, T2::Item);
+    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
   
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (
-            T0::resolve(container), 
-            T1::resolve(container),
-            T2::resolve(container)
-        )
+        (T0::resolve(container), T1::resolve(container), T2::resolve(container))
     }
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        Self::resolve(container)
+    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
+        (T0::resolve_prechecked(container), T1::resolve_prechecked(container), T2::resolve_prechecked(container))
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable for (T0, T1, T2, T3) {
-    type Item = T4Family<T0, T1, T2, T3>;
-    type ItemPreChecked = T4Family<T0, T1, T2, T3>;
+    type Item = (T0::Item, T1::Item, T2::Item, T3::Item);
+    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked, T3::ItemPreChecked);
 
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         (
@@ -114,8 +104,13 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable 
             T3::resolve(container)
         )
     }
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        Self::resolve(container)
+    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
+        (
+            T0::resolve_prechecked(container), 
+            T1::resolve_prechecked(container),
+            T2::resolve_prechecked(container),
+            T3::resolve_prechecked(container)
+        )
     }
 }
 
@@ -139,7 +134,7 @@ impl<T: Any> Resolvable for Singleton<T> {
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |(id, _)| id)
             .map(|f| {  
-                unsafe { resolve_unchecked::<Self::ItemPreChecked>(container, f) }
+                unsafe { resolve_unchecked::<Self>(container, f) }
             })
     }
 
@@ -148,9 +143,9 @@ impl<T: Any> Resolvable for Singleton<T> {
     }
 }
 
-unsafe fn resolve_unchecked<'a, T: FamilyLt<'a>>(container: &ServiceProvider, pos: usize) -> T::Out{
+unsafe fn resolve_unchecked<'a, T: Resolvable>(container: &'a ServiceProvider, pos: usize) -> <T::ItemPreChecked as FamilyLt<'a>>::Out {
     ({
-        let func_ptr = container.producers.get_unchecked(pos).1 as *const dyn Fn(&ServiceProvider) -> <T>::Out;
+        let func_ptr = container.producers.get_unchecked(pos).1 as *const dyn Fn(&ServiceProvider) -> <T::ItemPreChecked as FamilyLt<'a>>::Out;
         &* func_ptr
     })(&container)
 }
@@ -176,20 +171,22 @@ impl<'a, T: Resolvable> std::iter::Iterator for ServiceIterator<'a, T> {
                 None
             };
             
-            unsafe { resolve_unchecked::<T::ItemPreChecked>(self.provider, i) }
+            unsafe { resolve_unchecked::<T>(self.provider, i) }
         })
     }
 
     fn last(self) -> Option<Self::Item> where Self: Sized {
-        None
+        self.next_pos.map(|i| {
+            // If has_next, last must exist
+            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
+            unsafe { resolve_unchecked::<T>(self.provider, pos)}            
+        }) 
     }
     fn count(self) -> usize where Self: Sized {
-        let mut i = self.provider.producers.iter();
-        if let Some((first_id, _)) = i.next() {
-            1 + i.take_while(|(id,_)| id == first_id).count()
-        } else {
-            0
-        }
+        self.next_pos.map(|i| {
+            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
+            pos - i         
+        }).unwrap_or(0)
     }
 }
 pub struct ServiceIteratorFamily<T>(PhantomData<T>);
@@ -221,7 +218,7 @@ impl<T: Any> Resolvable for Transient<T> {
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |(id, _)| id)
             .map(|f| {    
-                unsafe { resolve_unchecked::<Self::ItemPreChecked>(container, f) }
+                unsafe { resolve_unchecked::<Self>(container, f) }
             })
     }
 
@@ -360,6 +357,19 @@ mod tests {
         container.register_singleton::<(), i32>(|_| 42);
         assert_eq!(Some(&42i32), container.build().get::<Singleton<i32>>());
     }
+
+    #[test]
+    fn tuple_dependency_resolves_to_prechecked_type() {
+        let mut container = ServiceCollection::new();
+        container.register_transient::<(), _>(|_| 64i64);
+        container.register_singleton::<(Transient<i64>, Transient<i64>), _>(|(a, b)| {
+            assert_eq!(64, a);
+            assert_eq!(64, b);
+            42
+        });
+        assert_eq!(Some(&42i32), container.build().get::<Singleton<i32>>());
+    }
+
     #[test]
     fn get_unkown_returns_none() {
         let container = ServiceCollection::new();
