@@ -6,6 +6,7 @@ use {
 };
 
 mod binary_search;
+
 // The family trait for type constructors that have one input lifetime.
 pub trait FamilyLt<'a> {
     type Out;
@@ -252,7 +253,7 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    pub fn register_singleton<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+    pub fn register_singleton<'s, 'a: 's, TDependency: Resolvable, T: Any + Sync>(&'s mut self, creator: fn(<TDependency::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
         let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
             unsafe { 
