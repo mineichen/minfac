@@ -249,10 +249,13 @@ impl Drop for ServiceCollection {
 }
 
 impl ServiceCollection {
-    pub fn register_transient<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
-        let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |container: &'a ServiceProvider| {
-            let arg = TDependency::resolve_prechecked(container);
-            creator(arg)
+    pub fn with<T: Resolvable>(&mut self) -> ServiceCollectionWithDependency<'_, T> {
+        ServiceCollectionWithDependency(self, PhantomData)
+    }
+
+    pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
+        let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |_: &'a ServiceProvider| {
+            creator()
         });
         
         self.producers.push((
@@ -260,15 +263,15 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    pub fn register_singleton<'s, 'a: 's, TDependency: Resolvable, T: Any + Sync>(&'s mut self, creator: fn(<TDependency::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+
+    pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn() -> T) {
         let cell = once_cell::sync::OnceCell::new();
-        let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
+        let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |_: &'a ServiceProvider| { 
             unsafe { 
-                // Deref is valid because container cannot delete any producers
+                // Deref is valid because provider never alters any producers
                 // Unless destroying itself
                 &*(cell.get_or_init(|| {
-                    let arg = TDependency::resolve_prechecked(container);
-                    creator(arg)
+                    creator()
                 }) as *const T)
             }
         });
@@ -286,6 +289,38 @@ impl ServiceCollection {
     }
 }
 
+pub struct ServiceCollectionWithDependency<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
+impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
+    pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+        let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |container: &'a ServiceProvider| {
+            let arg = TDep::resolve_prechecked(container);
+            creator(arg)
+        });
+        
+        self.0.producers.push((
+            TypeId::of::<Transient<T>>(), 
+            Box::into_raw(func) as *const dyn Fn()
+        ));
+    }
+    pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+        let cell = once_cell::sync::OnceCell::new();
+        let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
+            unsafe { 
+                // Deref is valid because provider never alters any producers
+                // Unless destroying itself
+                &*(cell.get_or_init(|| {
+                    let arg = TDep::resolve_prechecked(container);
+                    creator(arg)
+                }) as *const T)
+            }
+        });
+        
+        self.0.producers.push((
+            TypeId::of::<Singleton<T>>(), 
+            Box::into_raw(func) as *const dyn Fn()
+        ));
+    }
+}
 pub struct ServiceProvider {
     /// Mustn't be changed because `resolve_unchecked` relies on it.
     producers: Vec<(TypeId, *const dyn Fn())>
@@ -305,7 +340,6 @@ impl ServiceProvider {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use {super::* };
@@ -313,10 +347,10 @@ mod tests {
     #[test]
     fn resolve_last_transient() {
         let mut col = ServiceCollection::new();
-        col.register_transient::<(), _>(|_| 0);
-        col.register_transient::<(), _>(|_| 5);
-        col.register_transient::<(), _>(|_| 1);
-        col.register_transient::<(), _>(|_| 2);
+        col.register_transient(|| 0);
+        col.register_transient(|| 5);
+        col.register_transient(|| 1);
+        col.register_transient(|| 2);
         let provider = col.build().expect("Expected to have all dependencies");
         let nr = Transient::<i32>::resolve(&provider).unwrap();
         assert_eq!(2, nr);
@@ -325,9 +359,9 @@ mod tests {
     #[test]
     fn resolve_last_singleton() {
         let mut container = ServiceCollection::new();
-        container.register_singleton::<(), _>(|_| 0);
-        container.register_singleton::<(), _>(|_| 1);
-        container.register_singleton::<(), _>(|_| 2);
+        container.register_singleton(|| 0);
+        container.register_singleton(|| 1);
+        container.register_singleton(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
         let nr_ref = Singleton::<i32>::resolve(&provider).unwrap();
         assert_eq!(
@@ -339,29 +373,29 @@ mod tests {
     #[test]
     fn resolve_transient_services() {
         let mut container = ServiceCollection::new();
-        container.register_transient::<(), _>(|_| 0);
-        container.register_transient::<(), _>(|_| 5);
-        container.register_transient::<(), _>(|_| 2);
+        container.register_transient(|| 0);
+        container.register_transient(|| 5);
+        container.register_transient(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = TransientServices::<i32>::resolve(&provider);
+        let mut count_subset = provider.get::<TransientServices::<i32>>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
-        assert_eq!(3, TransientServices::<i32>::resolve(&provider).count());
+        assert_eq!(3, provider.get::<TransientServices::<i32>>().count());
 
         // Last
-        assert_eq!(Some(2), TransientServices::<i32>::resolve(&provider).last());
+        assert_eq!(Some(2), provider.get::<TransientServices::<i32>>().last());
         
-        let mut sub = TransientServices::<i32>::resolve(&provider);
+        let mut sub = provider.get::<TransientServices::<i32>>();
         sub.next();
         assert_eq!(Some(2), sub.last());
 
-        let mut consumed = TransientServices::<i32>::resolve(&provider);
+        let mut consumed = provider.get::<TransientServices::<i32>>();
         consumed.by_ref().for_each(|_| {});
         assert_eq!(None, consumed.last());
         
-        let mut iter = TransientServices::<i32>::resolve(&provider);
+        let mut iter = provider.get::<TransientServices::<i32>>();
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(5), iter.next());
         assert_eq!(Some(2), iter.next());
@@ -371,19 +405,19 @@ mod tests {
     #[test]
     fn resolve_test() {
         let mut container = ServiceCollection::new();
-        container.register_transient::<(), _>(|_| 42);
-        container.register_singleton::<ServiceProvider,_>(|_| 42);
+        container.register_transient(|| 42);
+        container.register_singleton(|| 42);
         let provider = container.build().expect("Expected to have all dependencies");
         assert_eq!(
-            Transient::<i32>::resolve(&provider).unwrap(), 
-            Singleton::<i32>::resolve(&provider).map(|f| *f).unwrap()
+            provider.get::<Transient::<i32>>().unwrap(), 
+            provider.get::<Singleton::<i32>>().map(|f| *f).unwrap()
         );
     }
 
     #[test]
     fn get_registered_dynamic_id() {
         let mut container = ServiceCollection::new();
-        container.register_transient::<(),_>(|_| 42);
+        container.register_transient(|| 42);
         assert_eq!(
             Some(42i32), 
             container.build()
@@ -394,7 +428,7 @@ mod tests {
     #[test]
     fn get_registered_dynamic_ref() {
         let mut container = ServiceCollection::new();
-        container.register_singleton::<(), i32>(|_| 42);
+        container.register_singleton(|| 42);
         assert_eq!(
             Some(&42i32), 
             container.build()
@@ -405,8 +439,8 @@ mod tests {
     #[test]
     fn tuple_dependency_resolves_to_prechecked_type() {
         let mut container = ServiceCollection::new();
-        container.register_transient::<(), _>(|_| 64i64);
-        container.register_singleton::<(Transient<i64>, Transient<i64>), _>(|(a, b)| {
+        container.register_transient(|| 64i64);
+        container.with::<(Transient<i64>, Transient<i64>)>().register_singleton(|(a, b)| {
             assert_eq!(64, a);
             assert_eq!(64, b);
             42
@@ -428,8 +462,8 @@ mod tests {
     #[test]
     fn resolve_tuple_2() {
         let mut container = ServiceCollection::new();
-        container.register_transient::<(), i32>(|_| 32);
-        container.register_singleton::<(), i64>(|_| 64);
+        container.register_transient(|| 32i32);
+        container.register_singleton(|| 64i64);
         assert_eq!(
             (Some(32), Some(&64)), 
             container.build()
@@ -441,9 +475,9 @@ mod tests {
     #[test]
     fn register_struct_as_dynamic() {
         let mut container = ServiceCollection::new();   
-        container.register_singleton::<(), _>(|_| 42i32);
-        container.register_singleton::<Singleton<i32>, _>(|i| ServiceImpl(i));
-        container.register_transient::<Singleton<ServiceImpl>, _>(|c| c as &dyn Service);
+        container.register_singleton(|| 42i32);
+        container.with::<Singleton<i32>>().register_singleton(|i| ServiceImpl(i));
+        container.with::<Singleton<ServiceImpl>>().register_transient(|c| c as &dyn Service);
         let provider = container.build().expect("Expected to have all dependencies");
         let service = provider.get::<Transient<&dyn Service>>()
             .expect("Expected to get a service");
@@ -466,13 +500,13 @@ mod tests {
     #[test]
     fn drop_singletons_after_provider_drop() {
         let mut col = ServiceCollection::new();
-        col.register_singleton::<(), _>(|_| Test);
+        col.register_singleton(|| Test);
         let prov = col.build().unwrap();
         drop(prov);
         assert_eq!(0, unsafe { DROP_COUNT });
         
         let mut col = ServiceCollection::new();
-        col.register_singleton::<(), _>(|_| Test);
+        col.register_singleton(|| Test);
         let prov = col.build().expect("Expected to have all dependencies");
         prov.get::<Singleton<Test>>().expect("Expected to receive the service");
         drop(prov);
