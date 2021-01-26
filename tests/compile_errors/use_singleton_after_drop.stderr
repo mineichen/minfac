@@ -1,0 +1,12 @@
+error[E0505]: cannot move out of `provider` because it is borrowed
+  --> $DIR/use_singleton_after_drop.rs:8:10
+   |
+7  |       let nr_ref = provider.get::<Singleton::<i32>>().unwrap();
+   |                    -------- borrow of `provider` occurs here
+8  |       drop(provider);
+   |            ^^^^^^^^ move out of `provider` occurs here
+9  | /     assert_eq!(
+10 | |         2,
+11 | |         *nr_ref
+12 | |     );
+   | |______- borrow later used here

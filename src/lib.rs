@@ -9,12 +9,12 @@ mod binary_search;
 
 // The family trait for type constructors that have one input lifetime.
 pub trait FamilyLt<'a> {
-    type Out;
+    type Out: 'a;
 }
 
 #[derive(Debug)]
 pub struct IdFamily<T: Any>(PhantomData<T>);
-impl<'a, T: Any> FamilyLt<'a> for IdFamily<T> {
+impl<'a, T: 'a + Any> FamilyLt<'a> for IdFamily<T> {
     type Out = T;
 }
 
@@ -24,17 +24,17 @@ impl<'a, T: 'a + Any> FamilyLt<'a> for RefFamily<T> {
     type Out = &'a T;
 }
 
-impl<'a, T: FamilyLt<'a>> FamilyLt<'a> for Option<T> {
+impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for Option<T> {
     type Out = Option<T::Out>;
 }
 
-impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>> FamilyLt<'a> for (T0, T1) {
+impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1) {
     type Out = (
         T0::Out,
         T1::Out
     );
 }
-impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>> FamilyLt<'a> for (T0, T1, T2) {
+impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a, T2: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1, T2) {
     type Out = (
         T0::Out,
         T1::Out,
@@ -43,10 +43,10 @@ impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>> FamilyLt<'a> for 
 }
 impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>> FamilyLt<'a> for (T0, T1, T2, T3) {
     type Out = (
-        T0::Out,
-        T1::Out,
-        T2::Out,
-        T3::Out
+        <T0 as FamilyLt<'a>>::Out,
+        <T1 as FamilyLt<'a>>::Out,
+        <T2 as FamilyLt<'a>>::Out,
+        <T3 as FamilyLt<'a>>::Out
     );
 }
 
@@ -54,8 +54,8 @@ pub trait Resolvable: Any {
     type Item: for<'a> FamilyLt<'a>;
     type ItemPreChecked: for<'a> FamilyLt<'a>;
 
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out;
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out;
+    fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out;
+    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out;
 }
 
 impl Resolvable for () {
@@ -180,13 +180,13 @@ impl<'a, T: Resolvable> std::iter::Iterator for ServiceIterator<'a, T> {
         self.next_pos.map(|i| {
             // If has_next, last must exist
             let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
-            unsafe { resolve_unchecked::<T>(self.provider, pos)}            
+            unsafe { resolve_unchecked::<T>(self.provider, i+pos)}            
         }) 
     }
     fn count(self) -> usize where Self: Sized {
         self.next_pos.map(|i| {
             let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
-            pos - i         
+            pos + 1       
         }).unwrap_or(0)
     }
 }
@@ -240,6 +240,13 @@ impl ServiceCollection {
         }
     }
 } 
+impl Drop for ServiceCollection {
+    fn drop(&mut self) {
+        for p in self.producers.iter_mut() {
+            unsafe { drop(Box::from_raw(p.1 as *mut dyn Fn())) };
+        }
+    }
+}
 
 impl ServiceCollection {
     pub fn register_transient<'s, 'a: 's, TDependency: Resolvable, T: Any>(&'s mut self, creator: fn(<TDependency::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
@@ -271,15 +278,25 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    pub fn build(mut self) -> ServiceProvider {
+    pub fn build(mut self) -> Result<ServiceProvider, ()> {
         self.producers.sort_by_key(|(id,_)| *id);
-        ServiceProvider { producers: self.producers}
+        let mut producers = Vec::new();
+        core::mem::swap(&mut self.producers, &mut producers);
+        Ok (ServiceProvider { producers })
     }
 }
 
 pub struct ServiceProvider {
     /// Mustn't be changed because `resolve_unchecked` relies on it.
     producers: Vec<(TypeId, *const dyn Fn())>
+}
+
+impl Drop for ServiceProvider {
+    fn drop(&mut self) {
+        for p in self.producers.iter_mut() {
+            unsafe { drop(Box::from_raw(p.1 as *mut dyn Fn())) };
+        }
+    }
 }
 
 impl ServiceProvider {
@@ -291,20 +308,18 @@ impl ServiceProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::* };
     
     #[test]
     fn resolve_last_transient() {
-        let mut container = ServiceCollection::new();
-        container.register_transient::<(), _>(|_| 0);
-        container.register_transient::<(), _>(|_| 5);
-        container.register_transient::<(), _>(|_| 1);
-        container.register_transient::<(), _>(|_| 2);
-        let provider = container.build();
-        assert_eq!(
-            2, 
-            Transient::<i32>::resolve(&provider).unwrap()
-        );
+        let mut col = ServiceCollection::new();
+        col.register_transient::<(), _>(|_| 0);
+        col.register_transient::<(), _>(|_| 5);
+        col.register_transient::<(), _>(|_| 1);
+        col.register_transient::<(), _>(|_| 2);
+        let provider = col.build().expect("Expected to have all dependencies");
+        let nr = Transient::<i32>::resolve(&provider).unwrap();
+        assert_eq!(2, nr);
     }
 
     #[test]
@@ -313,10 +328,11 @@ mod tests {
         container.register_singleton::<(), _>(|_| 0);
         container.register_singleton::<(), _>(|_| 1);
         container.register_singleton::<(), _>(|_| 2);
-        let provider = container.build();
+        let provider = container.build().expect("Expected to have all dependencies");
+        let nr_ref = Singleton::<i32>::resolve(&provider).unwrap();
         assert_eq!(
             2, 
-            *Singleton::<i32>::resolve(&provider).unwrap()
+            *nr_ref
         );
     }
 
@@ -326,7 +342,25 @@ mod tests {
         container.register_transient::<(), _>(|_| 0);
         container.register_transient::<(), _>(|_| 5);
         container.register_transient::<(), _>(|_| 2);
-        let provider = container.build();
+        let provider = container.build().expect("Expected to have all dependencies");
+
+        // Count
+        let mut count_subset = TransientServices::<i32>::resolve(&provider);
+        count_subset.next();
+        assert_eq!(2, count_subset.count());
+        assert_eq!(3, TransientServices::<i32>::resolve(&provider).count());
+
+        // Last
+        assert_eq!(Some(2), TransientServices::<i32>::resolve(&provider).last());
+        
+        let mut sub = TransientServices::<i32>::resolve(&provider);
+        sub.next();
+        assert_eq!(Some(2), sub.last());
+
+        let mut consumed = TransientServices::<i32>::resolve(&provider);
+        consumed.by_ref().for_each(|_| {});
+        assert_eq!(None, consumed.last());
+        
         let mut iter = TransientServices::<i32>::resolve(&provider);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(5), iter.next());
@@ -339,7 +373,7 @@ mod tests {
         let mut container = ServiceCollection::new();
         container.register_transient::<(), _>(|_| 42);
         container.register_singleton::<ServiceProvider,_>(|_| 42);
-        let provider = container.build();
+        let provider = container.build().expect("Expected to have all dependencies");
         assert_eq!(
             Transient::<i32>::resolve(&provider).unwrap(), 
             Singleton::<i32>::resolve(&provider).map(|f| *f).unwrap()
@@ -350,13 +384,22 @@ mod tests {
     fn get_registered_dynamic_id() {
         let mut container = ServiceCollection::new();
         container.register_transient::<(),_>(|_| 42);
-        assert_eq!(Some(42i32), container.build().get::<Transient<i32>>());
+        assert_eq!(
+            Some(42i32), 
+            container.build()
+                .expect("Expected to have all dependencies")
+                .get::<Transient<i32>>()
+        );
     }
     #[test]
     fn get_registered_dynamic_ref() {
         let mut container = ServiceCollection::new();
         container.register_singleton::<(), i32>(|_| 42);
-        assert_eq!(Some(&42i32), container.build().get::<Singleton<i32>>());
+        assert_eq!(
+            Some(&42i32), 
+            container.build()
+                .expect("Expected to have all dependencies")
+                .get::<Singleton<i32>>());
     }
 
     #[test]
@@ -368,13 +411,18 @@ mod tests {
             assert_eq!(64, b);
             42
         });
-        assert_eq!(Some(&42i32), container.build().get::<Singleton<i32>>());
+        assert_eq!(Some(&42i32), container.build().expect("Expected to have all dependencies").get::<Singleton<i32>>());
     }
 
     #[test]
     fn get_unkown_returns_none() {
         let container = ServiceCollection::new();
-        assert_eq!(None, container.build().get::<Transient<i32>>());
+        assert_eq!(
+            None, 
+            container.build()
+                .expect("Expected to have all dependencies")
+                .get::<Transient<i32>>()
+        );
     }
 
     #[test]
@@ -382,7 +430,12 @@ mod tests {
         let mut container = ServiceCollection::new();
         container.register_transient::<(), i32>(|_| 32);
         container.register_singleton::<(), i64>(|_| 64);
-        assert_eq!((Some(32), Some(&64)), container.build().get::<(Transient<i32>, Singleton<i64>)>());
+        assert_eq!(
+            (Some(32), Some(&64)), 
+            container.build()
+                .expect("Expected to have all dependencies")
+                .get::<(Transient<i32>, Singleton<i64>)>()
+        );
     }
 
     #[test]
@@ -391,9 +444,10 @@ mod tests {
         container.register_singleton::<(), _>(|_| 42i32);
         container.register_singleton::<Singleton<i32>, _>(|i| ServiceImpl(i));
         container.register_transient::<Singleton<ServiceImpl>, _>(|c| c as &dyn Service);
-        let service = container.build()
-            .get::<Transient<&dyn Service>>()
+        let provider = container.build().expect("Expected to have all dependencies");
+        let service = provider.get::<Transient<&dyn Service>>()
             .expect("Expected to get a service");
+       
         assert_eq!(42, service.get_value());
     }
 
@@ -404,7 +458,32 @@ mod tests {
     struct ServiceImpl<'a>(&'a i32);
     impl<'a> Service for ServiceImpl<'a> {
         fn get_value(&self) -> i32 {
+            println!("Before getting");
             *self.0
+        }
+    }
+
+    #[test]
+    fn drop_singletons_after_provider_drop() {
+        let mut col = ServiceCollection::new();
+        col.register_singleton::<(), _>(|_| Test);
+        let prov = col.build().unwrap();
+        drop(prov);
+        assert_eq!(0, unsafe { DROP_COUNT });
+        
+        let mut col = ServiceCollection::new();
+        col.register_singleton::<(), _>(|_| Test);
+        let prov = col.build().expect("Expected to have all dependencies");
+        prov.get::<Singleton<Test>>().expect("Expected to receive the service");
+        drop(prov);
+        assert_eq!(1, unsafe { DROP_COUNT });
+    }
+
+    static mut DROP_COUNT: u8 = 0;
+    struct Test;
+    impl Drop for Test {
+        fn drop(&mut self) {
+            unsafe { DROP_COUNT += 1 };
         }
     }
 }
