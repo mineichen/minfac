@@ -50,11 +50,22 @@ impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>>
     );
 }
 
+/// Represents anything resolvable by a ServiceProvider.
 pub trait Resolvable: Any {
+    /// Used if it's uncertain, wether a type is initializable, e.g.
+    /// - Option<i32> for provider.get<Singleton<i32>>() 
     type Item: for<'a> FamilyLt<'a>;
+    /// If a resolvable is used as a dependency for another service, ServiceCollection::build() ensures
+    /// that the dependency can be initialized. So it's currently used:
+    /// - provider.get<SingletonServices<i32>>() -> EmptyIterator if nothing is registered
+    /// - collection.with::<Singleton<i32>>().register_singleton(|_prechecked_i32: i32| {})
     type ItemPreChecked: for<'a> FamilyLt<'a>;
 
+    /// Resolves a type with the specified provider. There might be multiple calls to this method with
+    /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
     fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out;
+
+    /// Called internally when resolving dependencies.
     fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out;
 }
 
@@ -364,10 +375,7 @@ mod tests {
         container.register_singleton(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
         let nr_ref = provider.get::<Singleton::<i32>>().unwrap();
-        assert_eq!(
-            2, 
-            *nr_ref
-        );
+        assert_eq!(2, *nr_ref);
     }
 
     #[test]
