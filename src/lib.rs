@@ -75,7 +75,7 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
   
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (T0::resolve(container), T1::resolve(container))
+        (container.get::<T0>(), container.get::<T1>())
     }
   
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
@@ -87,7 +87,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
   
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (T0::resolve(container), T1::resolve(container), T2::resolve(container))
+        (container.get::<T0>(), container.get::<T1>(), container.get::<T2>())
     }
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         (T0::resolve_prechecked(container), T1::resolve_prechecked(container), T2::resolve_prechecked(container))
@@ -99,10 +99,10 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable 
 
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         (
-            T0::resolve(container), 
-            T1::resolve(container),
-            T2::resolve(container),
-            T3::resolve(container)
+            container.get::<T0>(), 
+            container.get::<T1>(),
+            container.get::<T2>(),
+            container.get::<T3>()
         )
     }
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
@@ -352,7 +352,7 @@ mod tests {
         col.register_transient(|| 1);
         col.register_transient(|| 2);
         let provider = col.build().expect("Expected to have all dependencies");
-        let nr = Transient::<i32>::resolve(&provider).unwrap();
+        let nr = provider.get::<Transient::<i32>>().unwrap();
         assert_eq!(2, nr);
     }
 
@@ -363,7 +363,7 @@ mod tests {
         container.register_singleton(|| 1);
         container.register_singleton(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
-        let nr_ref = Singleton::<i32>::resolve(&provider).unwrap();
+        let nr_ref = provider.get::<Singleton::<i32>>().unwrap();
         assert_eq!(
             2, 
             *nr_ref
