@@ -461,6 +461,10 @@ mod tests {
 
     #[test]
     fn resolve_transient_services() {
+        resolve_services::<TransientServices<i32>>()
+    }
+    
+    fn resolve_services<T: Resolvable<Item=ServiceIteratorFamily<Transient<i32>>>>() {
         let mut container = ServiceCollection::new();
         container.register_transient(|| 0);
         container.register_transient(|| 5);
@@ -468,7 +472,7 @@ mod tests {
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = provider.get::<TransientServices::<i32>>();
+        let mut count_subset = provider.get::<T>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
         assert_eq!(3, provider.get::<TransientServices::<i32>>().count());
