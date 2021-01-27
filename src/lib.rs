@@ -230,19 +230,31 @@ impl<'a, T: Resolvable> FamilyLt<'a> for ServiceIteratorFamily<T> {
     type Out = ServiceIterator<'a, T>;
 }
 
-pub struct TransientServices<T: Any>(PhantomData<T>);
-impl<T: Any> Resolvable for TransientServices<T> {
-    type Item = ServiceIteratorFamily<Transient<T>>;
-    type ItemPreChecked = ServiceIteratorFamily<Transient<T>>;
+pub trait GenericServices {
+    type Resolvable: Resolvable;
+}
+
+impl<TServices: GenericServices + 'static> Resolvable for TServices {
+    type Item = ServiceIteratorFamily<TServices::Resolvable>;
+    type ItemPreChecked = ServiceIteratorFamily<TServices::Resolvable>;
 
     fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<Transient<T>>(), |(id, _)| id);
+        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |(id, _)| id);
         ServiceIterator { provider: &container, item_type: PhantomData, next_pos }
     }
 
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         Self::resolve(container)
     }
+}
+
+pub struct TransientServices<T: Any>(PhantomData<T>);
+impl<T: Any> GenericServices for TransientServices<T> {
+    type Resolvable = Transient<T>;
+}
+pub struct SingletonServices<T: Any>(PhantomData<T>);
+impl<T: Any> GenericServices for SingletonServices<T> {
+    type Resolvable = Singleton<T>;
 }
 
 pub struct Transient<T: Any>(PhantomData<T>);
@@ -365,6 +377,8 @@ impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
     }
     pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
+        TDep::add_resolvable_checker(&mut self.0);
+        
         let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
             unsafe { 
                 // Deref is valid because provider never alters any producers
@@ -439,13 +453,20 @@ mod tests {
     }
 
     fn build_with_missing_dependency_fails<T: Resolvable>() {
-        let mut col = ServiceCollection::new();
-        col.register_transient(|| 1);
-        col.with::<T>().register_transient(|_| ());
-        match col.build() {
-            Ok(_) => panic!("Build with missing dependency should fail"),
-            Err(e) => assert!(e == BuildError::MissingDependency)
+        fn check(mut col: ServiceCollection) {
+            col.register_transient(|| 1);
+            match col.build() {
+                Ok(_) => panic!("Build with missing dependency should fail"),
+                Err(e) => assert!(e == BuildError::MissingDependency)
+            }
         }
+        let mut col = ServiceCollection::new();
+        col.with::<T>().register_transient(|_| ());
+        check(col);
+
+        let mut col = ServiceCollection::new();
+        col.with::<T>().register_singleton(|_| ());
+        check(col);        
     }
 
     #[test]
@@ -461,10 +482,6 @@ mod tests {
 
     #[test]
     fn resolve_transient_services() {
-        resolve_services::<TransientServices<i32>>()
-    }
-    
-    fn resolve_services<T: Resolvable<Item=ServiceIteratorFamily<Transient<i32>>>>() {
         let mut container = ServiceCollection::new();
         container.register_transient(|| 0);
         container.register_transient(|| 5);
@@ -472,13 +489,13 @@ mod tests {
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = provider.get::<T>();
+        let mut count_subset = provider.get::<TransientServices<i32>>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
         assert_eq!(3, provider.get::<TransientServices::<i32>>().count());
 
         // Last
-        assert_eq!(Some(2), provider.get::<TransientServices::<i32>>().last());
+        assert_eq!(2, provider.get::<TransientServices<i32>>().last().unwrap());
         
         let mut sub = provider.get::<TransientServices::<i32>>();
         sub.next();
@@ -492,8 +509,45 @@ mod tests {
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(5), iter.next());
         assert_eq!(Some(2), iter.next());
-        assert_eq!(None, iter.next());        
+        assert_eq!(None, iter.next());     
     }
+    #[test]
+    fn resolve_singleton_services() {
+        let mut container = ServiceCollection::new();
+        container.register_singleton(|| 0);
+        container.register_singleton(|| 5);
+        container.register_singleton(|| 2);
+        let provider = container.build().expect("Expected to have all dependencies");
+
+        // Count
+        let mut count_subset = provider.get::<SingletonServices<i32>>();
+        count_subset.next();
+        assert_eq!(2, count_subset.count());
+        assert_eq!(3, provider.get::<SingletonServices::<i32>>().count());
+
+        // Last
+        assert_eq!(&2, provider.get::<SingletonServices<i32>>().last().unwrap());
+        
+        let mut sub = provider.get::<SingletonServices::<i32>>();
+        sub.next();
+        assert_eq!(Some(&2), sub.last());
+
+        let mut consumed = provider.get::<SingletonServices::<i32>>();
+        consumed.by_ref().for_each(|_| {});
+        assert_eq!(None, consumed.last());
+        
+        let mut iter = provider.get::<SingletonServices::<i32>>();
+        assert_eq!(Some(&0), iter.next());
+        assert_eq!(Some(&5), iter.next());
+        assert_eq!(Some(&2), iter.next());
+        assert_eq!(None, iter.next());     
+    }
+    /*
+    fn resolve_services<TInner, T>(m: for<'a> fn(<TInner::ItemPreChecked as FamilyLt<'a>>::Out) -> i32) 
+        where TInner: Resolvable, 
+            T: Resolvable<Item=ServiceIteratorFamily<TInner>> 
+    { */
+    
 
     #[test]
     fn resolve_test() {
