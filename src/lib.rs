@@ -30,15 +30,15 @@ impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for Option<T> {
 
 impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1) {
     type Out = (
-        T0::Out,
-        T1::Out
+        <T0 as FamilyLt<'a>>::Out,
+        <T1 as FamilyLt<'a>>::Out
     );
 }
 impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a, T2: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1, T2) {
     type Out = (
-        T0::Out,
-        T1::Out,
-        T2::Out
+        <T0 as FamilyLt<'a>>::Out,
+        <T1 as FamilyLt<'a>>::Out,
+        <T2 as FamilyLt<'a>>::Out
     );
 }
 impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>> FamilyLt<'a> for (T0, T1, T2, T3) {
@@ -67,6 +67,9 @@ pub trait Resolvable: Any {
 
     /// Called internally when resolving dependencies.
     fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out;
+
+    fn add_resolvable_checker(_: &mut ServiceCollection) {
+    }
 }
 
 impl Resolvable for () {
@@ -153,11 +156,15 @@ impl<T: Any> Resolvable for Singleton<T> {
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         Self::resolve(container).unwrap()
     }
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        add_dynamic_checker::<Self>(col)
+    }
 }
 
 unsafe fn resolve_unchecked<'a, T: Resolvable>(container: &'a ServiceProvider, pos: usize) -> <T::ItemPreChecked as FamilyLt<'a>>::Out {
     ({
-        let func_ptr = container.producers.get_unchecked(pos).1 as *const dyn Fn(&ServiceProvider) -> <T::ItemPreChecked as FamilyLt<'a>>::Out;
+        let func_ptr = container.producers
+            .get_unchecked(pos).1 as *const dyn Fn(&'a ServiceProvider) -> <T::ItemPreChecked as FamilyLt<'a>>::Out;
         &* func_ptr
     })(&container)
 }
@@ -237,17 +244,27 @@ impl<T: Any> Resolvable for Transient<T> {
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         Self::resolve(container).unwrap()
     }
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        add_dynamic_checker::<Self>(col)
+    }
 }
 
+fn add_dynamic_checker<T: Resolvable>(col: &mut ServiceCollection) {
+    col.dep_checkers.push(Box::new(|col| { 
+        col.producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }).is_ok()
+    }));
+}
 
 pub struct ServiceCollection {
     producers: Vec<(TypeId, *const dyn Fn())>,
+    dep_checkers: Vec<Box<dyn Fn(&ServiceCollection) -> bool>>
 }
 
 impl ServiceCollection {
     pub fn new() -> Self {
         Self {
-            producers: Vec::new()
+            producers: Vec::new(),
+            dep_checkers: Vec::new()
         }
     }
 } 
@@ -277,13 +294,14 @@ impl ServiceCollection {
 
     pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn() -> T) {
         let cell = once_cell::sync::OnceCell::new();
-        let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |_: &'a ServiceProvider| { 
+        
+        let func : Box<dyn Fn(&'a ServiceProvider) -> &'a T> = Box::new(move |_: &'a ServiceProvider| { 
             unsafe { 
                 // Deref is valid because provider never alters any producers
                 // Unless destroying itself
                 &*(cell.get_or_init(|| {
                     creator()
-                }) as *const T)
+                }) as *const T) as &'a T
             }
         });
         
@@ -292,17 +310,33 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    pub fn build(mut self) -> Result<ServiceProvider, ()> {
+    pub fn build(mut self) -> Result<ServiceProvider, BuildError> {
         self.producers.sort_by_key(|(id,_)| *id);
         let mut producers = Vec::new();
+        let mut dep_checkers = Vec::new();
+
+        core::mem::swap(&mut self.dep_checkers, &mut dep_checkers);
+        for checker in dep_checkers.iter() {
+            if !(checker)(&mut self) {
+                return Err(BuildError::MissingDependency);
+            }
+        }
+
         core::mem::swap(&mut self.producers, &mut producers);
         Ok (ServiceProvider { producers })
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum BuildError {
+    MissingDependency
+}
+
 pub struct ServiceCollectionWithDependency<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
 impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+        TDep::add_resolvable_checker(&mut self.0);
+        
         let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |container: &'a ServiceProvider| {
             let arg = TDep::resolve_prechecked(container);
             creator(arg)
@@ -365,6 +399,24 @@ mod tests {
         let provider = col.build().expect("Expected to have all dependencies");
         let nr = provider.get::<Transient::<i32>>().unwrap();
         assert_eq!(2, nr);
+    }    
+
+    #[test]
+    fn build_with_missing_transient_dep_fails() {
+        build_with_missing_dependency_fails::<Transient<String>>();
+    }
+    #[test]
+    fn build_with_missing_singleton_dep_fails() {
+        build_with_missing_dependency_fails::<Singleton<String>>();
+    }
+
+    fn build_with_missing_dependency_fails<T: Resolvable>() {
+        let mut col = ServiceCollection::new();
+        col.with::<T>().register_transient(|_| ());
+        match col.build() {
+            Ok(_) => panic!("Build with missing dependency should fail"),
+            Err(e) => assert!(e == BuildError::MissingDependency)
+        }
     }
 
     #[test]

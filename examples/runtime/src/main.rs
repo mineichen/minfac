@@ -3,12 +3,12 @@ extern crate libloading as lib;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lib = lib::Library::new("target/debug/libplugin.dylib")?;
     let mut container = ioc_rs::ServiceCollection::new();
-    container.register_transient::<(), i32>(|_| 42);
+    container.register_transient(|| 42);
     unsafe {
         let func: lib::Symbol<unsafe extern fn(&mut ioc_rs::ServiceCollection)> = lib.get(b"register")?;
         func(&mut container);
     }
-    let provider = container.build();
+    let provider = container.build().expect("Expected all dependencies to resolve");
 
     
     let service = provider
