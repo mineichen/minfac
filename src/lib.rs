@@ -95,6 +95,11 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         (T0::resolve_prechecked(container), T1::resolve_prechecked(container))
     }
+
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        T0::add_resolvable_checker(col);
+        T1::add_resolvable_checker(col);
+    }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
     type Item = (T0::Item, T1::Item, T2::Item);
@@ -105,6 +110,11 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
     }
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
         (T0::resolve_prechecked(container), T1::resolve_prechecked(container), T2::resolve_prechecked(container))
+    }
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        T0::add_resolvable_checker(col);
+        T1::add_resolvable_checker(col);
+        T2::add_resolvable_checker(col);
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable for (T0, T1, T2, T3) {
@@ -126,6 +136,12 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable 
             T2::resolve_prechecked(container),
             T3::resolve_prechecked(container)
         )
+    }
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        T0::add_resolvable_checker(col);
+        T1::add_resolvable_checker(col);
+        T2::add_resolvable_checker(col);
+        T3::add_resolvable_checker(col);
     }
 }
 
@@ -409,9 +425,22 @@ mod tests {
     fn build_with_missing_singleton_dep_fails() {
         build_with_missing_dependency_fails::<Singleton<String>>();
     }
+    #[test]
+    fn build_with_missing_tuple2_dep_fails() {
+        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>)>();
+    }
+    #[test]
+    fn build_with_missing_tuple3_dep_fails() {
+        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>, Transient<i32>)>();
+    }
+    #[test]
+    fn build_with_missing_tuple4_dep_fails() {
+        build_with_missing_dependency_fails::<(Transient<i32>, Transient<String>, Transient<i32>, Transient<i32>)>();
+    }
 
     fn build_with_missing_dependency_fails<T: Resolvable>() {
         let mut col = ServiceCollection::new();
+        col.register_transient(|| 1);
         col.with::<T>().register_transient(|_| ());
         match col.build() {
             Ok(_) => panic!("Build with missing dependency should fail"),
