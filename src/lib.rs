@@ -1,3 +1,33 @@
+
+//! # IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
+//! 
+//! Complete example:
+//! ```
+//! use ioc_rs::{ServiceCollection, Singleton, SingletonServices, Transient};
+//! let mut collection = ioc_rs::ServiceCollection::new();
+//! 
+//! collection
+//!     .with::<Transient<i16>>()
+//!     .register_transient(|i| i as i32 * 2);
+//! collection
+//!     .with::<(SingletonServices<i8>, Transient<i16>, Transient<i32>)>()
+//!     .register_transient(|(bytes, short, int)| bytes.map(|i| *i as i64).sum::<i64>() + short as i64 + int as i64);
+//! collection.register_singleton(|| 1i8);
+//! collection.register_singleton(|| 2i8);
+//! collection.register_singleton(|| 3i8);
+//! collection.register_transient(|| 4i16);
+//!
+//! let provider = collection.build().expect("All dependencies are resolvable");
+//! assert_eq!(Some(&3), provider.get::<Singleton<i8>>()); // Last registered i8
+//! assert_eq!(Some(1+2+3+4+(2*4)), provider.get::<Transient<i64>>()); // composed i64
+//! ```
+//! # Notes
+//! - Registration is order independent
+//! - Registration can occur in separately compiled dynamic lib (see /examples)
+//! - Types requested as dependencies (.with<>()) are, in contrast to ServiceProvider.get(), not Options, because their existance is asserted at ServiceCollection.build()
+//! 
+//! Visit the documentation for more details
+
 use {
     core::{
         marker::PhantomData,
@@ -50,7 +80,7 @@ impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>>
     );
 }
 
-/// Represents anything resolvable by a ServiceProvider.
+/// Represents anything resolvable by a ServiceProvider. 
 pub trait Resolvable: Any {
     /// Used if it's uncertain, wether a type is initializable, e.g.
     /// - Option<i32> for provider.get<Singleton<i32>>() 
@@ -101,6 +131,7 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
         T1::add_resolvable_checker(col);
     }
 }
+
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);

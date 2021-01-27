@@ -1,5 +1,5 @@
 # Lightweight Inversion of control
-This library is inspired by .Net's Microsoft.Extensions.DependencyInjection framework.
+IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 
 # Features
 - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
