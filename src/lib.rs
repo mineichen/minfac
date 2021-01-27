@@ -41,23 +41,34 @@ mod resolvable;
 mod binary_search;
 mod family_lifetime;
 
+
+/// Represents instances of a type `T` within a `ServiceProvider`
 pub struct ServiceIterator<'a, T> {
     next_pos: Option<usize>,
     provider: &'a ServiceProvider, 
     item_type: PhantomData<T>
 }
 
+/// Represents a Query for an instance of Type `T` which is shared for all calls to the same ServiceProvider
 pub struct Singleton<T: Any>(PhantomData<T>);
+
+/// Represents a Query for an instance of `T` by value. 
 pub struct Transient<T: Any>(PhantomData<T>);
+
+/// Represents a Query for all registered instances of Type `T`. Each of those is shared for all calls to the same ServiceProvider
 pub struct TransientServices<T: Any>(PhantomData<T>);
+/// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
 pub struct SingletonServices<T: Any>(PhantomData<T>);
 
+/// Collection of constructors for different types of services. Registered constructors are never called in this state.
+/// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
     producers: Vec<(TypeId, *const dyn Fn())>,
-    dep_checkers: Vec<Box<dyn Fn(&ServiceCollection) -> bool>>
+    dep_checkers: Vec<Box<dyn Fn(&ServiceCollection) -> Result<(), BuildError>>>
 }
 
 impl ServiceCollection {
+    /// Creates an empty ServiceCollection
     pub fn new() -> Self {
         Self {
             producers: Vec::new(),
@@ -74,10 +85,13 @@ impl Drop for ServiceCollection {
 }
 
 impl ServiceCollection {
-    pub fn with<T: Resolvable>(&mut self) -> ServiceCollectionWithDependency<'_, T> {
-        ServiceCollectionWithDependency(self, PhantomData)
+    /// Generate a ServiceBuilder with `T` as a dependency.
+    pub fn with<T: Resolvable>(&mut self) -> ServiceBuilder<'_, T> {
+        ServiceBuilder(self, PhantomData)
     }
 
+    /// Registers a transient service without dependencies. 
+    /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
         let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |_: &'a ServiceProvider| {
             creator()
@@ -89,6 +103,8 @@ impl ServiceCollection {
         ));
     }
 
+    /// Registers a singleton service without dependencies. 
+    /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn() -> T) {
         let cell = once_cell::sync::OnceCell::new();
         
@@ -107,6 +123,8 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
+    /// Checks, if all dependencies of registered services are available.
+    /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(mut self) -> Result<ServiceProvider, BuildError> {
         self.producers.sort_by_key(|(id,_)| *id);
         let mut producers = Vec::new();
@@ -114,9 +132,7 @@ impl ServiceCollection {
 
         core::mem::swap(&mut self.dep_checkers, &mut dep_checkers);
         for checker in dep_checkers.iter() {
-            if !(checker)(&mut self) {
-                return Err(BuildError::MissingDependency);
-            }
+            (checker)(&mut self)?;
         }
 
         core::mem::swap(&mut self.producers, &mut producers);
@@ -124,13 +140,20 @@ impl ServiceCollection {
     }
 }
 
+/// Possible errors when calling ServiceCollection::build()
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuildError {
-    MissingDependency
+    MissingDependency(MissingDependencyInfos),
+    CyclicDependency(String)
 }
 
-pub struct ServiceCollectionWithDependency<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
-impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
+#[derive(Debug, PartialEq, Eq)]
+pub struct MissingDependencyInfos {
+    missing: &'static str
+}
+
+pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
+impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
         
@@ -144,10 +167,10 @@ impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
+    
     pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
-        
         let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
             unsafe { 
                 // Deref is valid because provider never alters any producers
@@ -186,6 +209,7 @@ impl ServiceProvider {
 
 #[cfg(test)]
 mod tests {
+
     use {super::* };
     
     #[test]
@@ -202,40 +226,47 @@ mod tests {
 
     #[test]
     fn build_with_missing_transient_dep_fails() {
-        build_with_missing_dependency_fails::<Transient<String>>();
+        build_with_missing_dependency_fails::<Transient<String>>(&["Transient", "String"]);
     }
     #[test]
     fn build_with_missing_singleton_dep_fails() {
-        build_with_missing_dependency_fails::<Singleton<String>>();
+        build_with_missing_dependency_fails::<Singleton<String>>(&["Singleton", "String"]);
     }
     #[test]
     fn build_with_missing_tuple2_dep_fails() {
-        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>)>();
+        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>)>(&["Transient", "String"]);
     }
     #[test]
     fn build_with_missing_tuple3_dep_fails() {
-        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>, Transient<i32>)>();
+        build_with_missing_dependency_fails::<(Transient<String>, Transient<i32>, Transient<i32>)>(&["Transient", "String"]);
     }
     #[test]
     fn build_with_missing_tuple4_dep_fails() {
-        build_with_missing_dependency_fails::<(Transient<i32>, Transient<String>, Transient<i32>, Transient<i32>)>();
+        build_with_missing_dependency_fails::<(Transient<i32>, Transient<String>, Transient<i32>, Transient<i32>)>(&["Transient", "String"]);
     }
 
-    fn build_with_missing_dependency_fails<T: Resolvable>() {
-        fn check(mut col: ServiceCollection) {
+    fn build_with_missing_dependency_fails<T: Resolvable>(missing_msg_parts: &[&str]) {
+        fn check(mut col: ServiceCollection, missing_msg_parts: &[&str]) {
             col.register_transient(|| 1);
             match col.build() {
                 Ok(_) => panic!("Build with missing dependency should fail"),
-                Err(e) => assert!(e == BuildError::MissingDependency)
+                Err(e) => match e {
+                    BuildError::MissingDependency(msg) => {
+                        for part in missing_msg_parts {
+                            assert!(msg.missing.contains(part), "Expected '{}' to contain '{}'", msg.missing, part);
+                        }
+                    },
+                    _ => panic!("Unexpected Error")
+                }
             }
         }
         let mut col = ServiceCollection::new();
         col.with::<T>().register_transient(|_| ());
-        check(col);
+        check(col, missing_msg_parts);
 
         let mut col = ServiceCollection::new();
         col.with::<T>().register_singleton(|_| ());
-        check(col);        
+        check(col, missing_msg_parts);        
     }
 
     #[test]

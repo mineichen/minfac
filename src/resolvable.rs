@@ -225,6 +225,10 @@ impl<T: Any> resolvable::Resolvable for Transient<T> {
 
 fn add_dynamic_checker<T: resolvable::Resolvable>(col: &mut ServiceCollection) {
     col.dep_checkers.push(Box::new(|col| { 
-        col.producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }).is_ok()
+        match col.producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(BuildError::MissingDependency(
+                MissingDependencyInfos { missing: std::any::type_name::<T>() } ))
+        }
     }));
 }
