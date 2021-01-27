@@ -35,6 +35,7 @@ use {
     }
 };
 
+mod resolvable;
 mod binary_search;
 
 // The family trait for type constructors that have one input lifetime.
@@ -79,141 +80,10 @@ impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>>
         <T3 as FamilyLt<'a>>::Out
     );
 }
+pub struct ServiceIteratorFamily<T>(PhantomData<T>);
 
-/// Represents anything resolvable by a ServiceProvider. 
-pub trait Resolvable: Any {
-    /// Used if it's uncertain, wether a type is initializable, e.g.
-    /// - Option<i32> for provider.get<Singleton<i32>>() 
-    type Item: for<'a> FamilyLt<'a>;
-    /// If a resolvable is used as a dependency for another service, ServiceCollection::build() ensures
-    /// that the dependency can be initialized. So it's currently used:
-    /// - provider.get<SingletonServices<i32>>() -> EmptyIterator if nothing is registered
-    /// - collection.with::<Singleton<i32>>().register_singleton(|_prechecked_i32: i32| {})
-    type ItemPreChecked: for<'a> FamilyLt<'a>;
-
-    /// Resolves a type with the specified provider. There might be multiple calls to this method with
-    /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
-    fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out;
-
-    /// Called internally when resolving dependencies.
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out;
-
-    fn add_resolvable_checker(_: &mut ServiceCollection) {
-    }
-}
-
-impl Resolvable for () {
-    type Item = IdFamily<()>;
-    type ItemPreChecked = IdFamily<()>;
-
-    fn resolve<'s>(_: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        ()
-    }
-    fn resolve_prechecked<'s>(_: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        ()
-    }
-}
-
-impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
-    type Item = (T0::Item, T1::Item);
-    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
-  
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (container.get::<T0>(), container.get::<T1>())
-    }
-  
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        (T0::resolve_prechecked(container), T1::resolve_prechecked(container))
-    }
-
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        T0::add_resolvable_checker(col);
-        T1::add_resolvable_checker(col);
-    }
-}
-
-impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
-    type Item = (T0::Item, T1::Item, T2::Item);
-    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
-  
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (container.get::<T0>(), container.get::<T1>(), container.get::<T2>())
-    }
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        (T0::resolve_prechecked(container), T1::resolve_prechecked(container), T2::resolve_prechecked(container))
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        T0::add_resolvable_checker(col);
-        T1::add_resolvable_checker(col);
-        T2::add_resolvable_checker(col);
-    }
-}
-impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable for (T0, T1, T2, T3) {
-    type Item = (T0::Item, T1::Item, T2::Item, T3::Item);
-    type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked, T3::ItemPreChecked);
-
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        (
-            container.get::<T0>(), 
-            container.get::<T1>(),
-            container.get::<T2>(),
-            container.get::<T3>()
-        )
-    }
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        (
-            T0::resolve_prechecked(container), 
-            T1::resolve_prechecked(container),
-            T2::resolve_prechecked(container),
-            T3::resolve_prechecked(container)
-        )
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        T0::add_resolvable_checker(col);
-        T1::add_resolvable_checker(col);
-        T2::add_resolvable_checker(col);
-        T3::add_resolvable_checker(col);
-    }
-}
-
-impl Resolvable for ServiceProvider {
-    type Item = RefFamily<ServiceProvider>;
-    type ItemPreChecked  = RefFamily<ServiceProvider>;
-
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        container
-    }
-
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        Self::resolve(container)
-    }
-}
-pub struct Singleton<T: Any>(PhantomData<T>);
-impl<T: Any> Resolvable for Singleton<T> {
-    type Item = Option<RefFamily<T>>;
-    type ItemPreChecked = RefFamily<T>;
-
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |(id, _)| id)
-            .map(|f| {  
-                unsafe { resolve_unchecked::<Self>(container, f) }
-            })
-    }
-
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        Self::resolve(container).unwrap()
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        add_dynamic_checker::<Self>(col)
-    }
-}
-
-unsafe fn resolve_unchecked<'a, T: Resolvable>(container: &'a ServiceProvider, pos: usize) -> <T::ItemPreChecked as FamilyLt<'a>>::Out {
-    ({
-        let func_ptr = container.producers
-            .get_unchecked(pos).1 as *const dyn Fn(&'a ServiceProvider) -> <T::ItemPreChecked as FamilyLt<'a>>::Out;
-        &* func_ptr
-    })(&container)
+impl<'a, T: resolvable::Resolvable> FamilyLt<'a> for ServiceIteratorFamily<T> {
+    type Out = ServiceIterator<'a, T>;
 }
 
 pub struct ServiceIterator<'a, T> {
@@ -222,97 +92,10 @@ pub struct ServiceIterator<'a, T> {
     item_type: PhantomData<T>
 }
 
-impl<'a, T: Resolvable> std::iter::Iterator for ServiceIterator<'a, T> {
-    type Item = <T::ItemPreChecked as FamilyLt<'a>>::Out;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_pos.map(|i| {
-            self.next_pos = if let Some(next) = self.provider.producers.get(i + 1) {
-                if next.0 == TypeId::of::<T>() { 
-                    Some(i + 1) 
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            
-            unsafe { resolve_unchecked::<T>(self.provider, i) }
-        })
-    }
-
-    fn last(self) -> Option<Self::Item> where Self: Sized {
-        self.next_pos.map(|i| {
-            // If has_next, last must exist
-            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
-            unsafe { resolve_unchecked::<T>(self.provider, i+pos)}            
-        }) 
-    }
-    fn count(self) -> usize where Self: Sized {
-        self.next_pos.map(|i| {
-            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
-            pos + 1       
-        }).unwrap_or(0)
-    }
-}
-pub struct ServiceIteratorFamily<T>(PhantomData<T>);
-
-impl<'a, T: Resolvable> FamilyLt<'a> for ServiceIteratorFamily<T> {
-    type Out = ServiceIterator<'a, T>;
-}
-
-pub trait GenericServices {
-    type Resolvable: Resolvable;
-}
-
-impl<TServices: GenericServices + 'static> Resolvable for TServices {
-    type Item = ServiceIteratorFamily<TServices::Resolvable>;
-    type ItemPreChecked = ServiceIteratorFamily<TServices::Resolvable>;
-
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |(id, _)| id);
-        ServiceIterator { provider: &container, item_type: PhantomData, next_pos }
-    }
-
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        Self::resolve(container)
-    }
-}
-
-pub struct TransientServices<T: Any>(PhantomData<T>);
-impl<T: Any> GenericServices for TransientServices<T> {
-    type Resolvable = Transient<T>;
-}
-pub struct SingletonServices<T: Any>(PhantomData<T>);
-impl<T: Any> GenericServices for SingletonServices<T> {
-    type Resolvable = Singleton<T>;
-}
-
+pub struct Singleton<T: Any>(PhantomData<T>);
 pub struct Transient<T: Any>(PhantomData<T>);
-impl<T: Any> Resolvable for Transient<T> {
-    type Item = Option<IdFamily<T>>;
-    type ItemPreChecked = IdFamily<T>;
-
-    fn resolve<'s>(container: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |(id, _)| id)
-            .map(|f| {    
-                unsafe { resolve_unchecked::<Self>(container, f) }
-            })
-    }
-
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        Self::resolve(container).unwrap()
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        add_dynamic_checker::<Self>(col)
-    }
-}
-
-fn add_dynamic_checker<T: Resolvable>(col: &mut ServiceCollection) {
-    col.dep_checkers.push(Box::new(|col| { 
-        col.producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }).is_ok()
-    }));
-}
+pub struct TransientServices<T: Any>(PhantomData<T>);
+pub struct SingletonServices<T: Any>(PhantomData<T>);
 
 pub struct ServiceCollection {
     producers: Vec<(TypeId, *const dyn Fn())>,
@@ -336,7 +119,7 @@ impl Drop for ServiceCollection {
 }
 
 impl ServiceCollection {
-    pub fn with<T: Resolvable>(&mut self) -> ServiceCollectionWithDependency<'_, T> {
+    pub fn with<T: resolvable::Resolvable>(&mut self) -> ServiceCollectionWithDependency<'_, T> {
         ServiceCollectionWithDependency(self, PhantomData)
     }
 
@@ -391,8 +174,8 @@ pub enum BuildError {
     MissingDependency
 }
 
-pub struct ServiceCollectionWithDependency<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
-impl<'col, TDep: Resolvable> ServiceCollectionWithDependency<'col, TDep> {
+pub struct ServiceCollectionWithDependency<'col, T: resolvable::Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
+impl<'col, TDep: resolvable::Resolvable> ServiceCollectionWithDependency<'col, TDep> {
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
         
@@ -441,7 +224,7 @@ impl Drop for ServiceProvider {
 }
 
 impl ServiceProvider {
-    pub fn get<'s, T: Resolvable>(&'s self) -> <T::Item as FamilyLt<'s>>::Out {
+    pub fn get<'s, T: resolvable::Resolvable>(&'s self) -> <T::Item as FamilyLt<'s>>::Out {
         T::resolve(self)
     }
 }
@@ -483,7 +266,7 @@ mod tests {
         build_with_missing_dependency_fails::<(Transient<i32>, Transient<String>, Transient<i32>, Transient<i32>)>();
     }
 
-    fn build_with_missing_dependency_fails<T: Resolvable>() {
+    fn build_with_missing_dependency_fails<T: resolvable::Resolvable>() {
         fn check(mut col: ServiceCollection) {
             col.register_transient(|| 1);
             match col.build() {

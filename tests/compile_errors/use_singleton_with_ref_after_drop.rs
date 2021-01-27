@@ -7,7 +7,7 @@ fn main() {
     let provider = container.build().expect("Expected to have all dependencies");
     let service = provider.get::<Transient<&dyn Service>>()
         .expect("Expected to get a service");
-    drop(provider);
+    drop(provider); // Must fail to compile
         
     assert_eq!(42, service.get_value());
 }
