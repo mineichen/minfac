@@ -3,15 +3,19 @@
 //! 
 //! Complete example:
 //! ```
-//! use ioc_rs::{ServiceCollection, Singleton, SingletonServices, Transient};
+//! use ioc_rs::{ServiceCollection, ServiceProvider, Singleton, SingletonServices, Transient};
 //! let mut collection = ioc_rs::ServiceCollection::new();
 //! 
 //! collection
 //!     .with::<Transient<i16>>()
 //!     .register_transient(|i| i as i32 * 2);
 //! collection
-//!     .with::<(SingletonServices<i8>, Transient<i16>, Transient<i32>)>()
-//!     .register_transient(|(bytes, short, int)| bytes.map(|i| *i as i64).sum::<i64>() + short as i64 + int as i64);
+//!     .with::<(ServiceProvider, SingletonServices<i8>, Transient<i32>)>()
+//!     .register_transient(|(provider, bytes, int)| {
+//!         provider.get::<Transient<i16>>().map(|i| i as i64).unwrap_or(1000) // Optional Dependency, fallback not used
+//!         + provider.get::<Transient<i128>>().map(|i| i as i64).unwrap_or(2000) // Optional Dependency, fallback
+//!         + bytes.map(|i| { *i as i64 }).sum::<i64>()
+//!         + int as i64 });
 //! collection.register_singleton(|| 1i8);
 //! collection.register_singleton(|| 2i8);
 //! collection.register_singleton(|| 3i8);
@@ -19,7 +23,7 @@
 //!
 //! let provider = collection.build().expect("All dependencies are resolvable");
 //! assert_eq!(Some(&3), provider.get::<Singleton<i8>>()); // Last registered i8
-//! assert_eq!(Some(1+2+3+4+(2*4)), provider.get::<Transient<i64>>()); // composed i64
+//! assert_eq!(Some(4+2000+(1+2+3)+(2*4)), provider.get::<Transient<i64>>()); // composed i64
 //! ```
 //! # Notes
 //! - Registration is order independent
