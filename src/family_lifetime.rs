@@ -24,6 +24,9 @@ impl<'a, T: 'a + Any> FamilyLt<'a> for RefFamily<T> {
 impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for Option<T> {
     type Out = Option<T::Out>;
 }
+impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for std::sync::Arc<T> {
+    type Out = std::sync::Arc<T::Out>;
+}
 
 impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1) {
     type Out = (

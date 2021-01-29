@@ -117,6 +117,25 @@ impl Resolvable for ServiceProvider {
     }
 }
 
+impl<T: Any> resolvable::Resolvable for Arc<T> {
+    type Item = Option<Arc<IdFamily<T>>>;
+    type ItemPreChecked = Arc<IdFamily<T>>;
+
+    fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
+        binary_search::binary_search_by_last_key(&provider.producers, &TypeId::of::<Self>(), |(id, _)| id)
+            .map(|f| {  
+                unsafe { resolve_unchecked::<Self>(provider, f) }
+            })
+    }
+
+    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
+        Self::resolve(provider).unwrap()
+    }
+    fn add_resolvable_checker(col: &mut ServiceCollection) {
+        add_dynamic_checker::<Self>(col)
+    }
+}
+
 impl<T: Any> resolvable::Resolvable for Singleton<T> {
     type Item = Option<RefFamily<T>>;
     type ItemPreChecked = RefFamily<T>;
@@ -202,6 +221,9 @@ impl<T: Any> GenericServices for TransientServices<T> {
 }
 impl<T: Any> GenericServices for SingletonServices<T> {
     type Resolvable = Singleton<T>;
+}
+impl<T: Any> GenericServices for ArcServices<T> {
+    type Resolvable = Arc<T>;
 }
 
 impl<T: Any> resolvable::Resolvable for Transient<T> {

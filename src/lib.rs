@@ -37,6 +37,7 @@ use {
         marker::PhantomData,
         any::{Any, TypeId}
     },
+    std::sync::Arc,
     family_lifetime::FamilyLt,
     resolvable::Resolvable
 };
@@ -64,6 +65,8 @@ pub struct TransientServices<T: Any>(PhantomData<T>);
 /// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
 pub struct SingletonServices<T: Any>(PhantomData<T>);
 
+/// Represents a Query for all registered instances of Type `T`. The same Arc is shared for all calls to the same ServiceProvider
+pub struct ArcServices<T: Any>(PhantomData<T>);
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
@@ -103,6 +106,22 @@ impl ServiceCollection {
         
         self.producers.push((
             TypeId::of::<Transient<T>>(), 
+            Box::into_raw(func) as *const dyn Fn()
+        ));
+    }
+    /// Registers a singleton service without dependencies. 
+    /// To add dependencies, use `with` to generate a ServiceBuilder.
+    pub fn register_arc<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
+        let cell = once_cell::sync::OnceCell::new();
+       
+        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |_container: &'a ServiceProvider| { 
+            cell.get_or_init(|| {
+                Arc::new(creator())
+            }).clone()            
+        });
+        
+        self.producers.push((
+            TypeId::of::<Arc<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
@@ -171,6 +190,21 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
+    pub fn register_arc<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+        let cell = once_cell::sync::OnceCell::new();
+        TDep::add_resolvable_checker(&mut self.0);
+        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |container: &'a ServiceProvider| { 
+            cell.get_or_init(|| {
+                let arg = TDep::resolve_prechecked(container);
+                Arc::new(creator(arg))
+            }).clone()            
+        });
+        
+        self.0.producers.push((
+            TypeId::of::<Arc<T>>(), 
+            Box::into_raw(func) as *const dyn Fn()
+        ));
+    }
     
     pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
@@ -227,6 +261,25 @@ mod tests {
         let nr = provider.get::<Transient::<i32>>().unwrap();
         assert_eq!(2, nr);
     }    
+
+    #[test]
+    fn resolve_arcs() {
+        let mut col = ServiceCollection::new();
+        col.register_arc(|| std::cell::RefCell::new(1));
+        col.with::<ServiceProvider>().register_arc(|_| std::cell::RefCell::new(2));
+
+        let prov = col.build().expect("Should have all Dependencies");
+        let second = prov.get::<Arc<std::cell::RefCell<i32>>>().expect("Expecte to get second");
+        assert_eq!(2, *second.borrow());
+        second.replace(42);
+
+        assert_eq!(
+            prov.get::<ArcServices<std::cell::RefCell<i32>>>()
+                .map(|c| *c.borrow())
+                .sum::<i32>(),
+            1 + 42
+        );
+    }
 
     #[test]
     fn build_with_missing_transient_dep_fails() {
