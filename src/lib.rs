@@ -68,29 +68,6 @@ pub struct TransientServices<T: Any>(PhantomData<T>);
 
 /// Represents a Query for all registered instances of Type `T`. The same instance is shared for all calls to the same ServiceProvider
 pub struct SharedServices<T: Any>(PhantomData<T>);
-/*
-/// Smart pointer representing a requested `Shared`. It is not allowed to keep any SharedServiceRef longer than the ServiceProvider
-/// it was received from. ServiceProvider panics when being dropped if any SharedServiceRef's are still alive.
-/// It doesn't support anything else but `core::ops::Deref`
-#[derive(Debug, PartialEq, Eq)]
-pub struct SharedServiceRef<T: ?Sized> {
-    store: Arc<T>
-}
-
-impl<T> SharedServiceRef<T> {
-    pub fn casted<TOut: ?Sized>(&self, map: fn(Arc<T>) -> Arc<TOut>) -> SharedServiceRef<TOut> {
-        SharedServiceRef { store: (map)(self.store.clone()) }
-    }
-}
-
-impl<T> Deref for SharedServiceRef<T> {
-    type Target = <Arc<T> as Deref>::Target;
-
-    fn deref(&self) -> &Self::Target {
-        self.store.deref()
-    }
-}
-*/
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
@@ -273,7 +250,7 @@ mod tests {
         build_with_missing_dependency_fails::<Transient<String>>(&["Transient", "String"]);
     }
     #[test]
-    fn build_with_missing_singleton_dep_fails() {
+    fn build_with_missing_shared_dep_fails() {
         build_with_missing_dependency_fails::<Shared<String>>(&["Shared", "String"]);
     }
     #[test]
