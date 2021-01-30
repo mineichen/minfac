@@ -56,11 +56,13 @@ pub struct ServiceIterator<'a, T> {
 }
 
 /// Represents a query for the last registered instance of Type `T` which is shared for all calls to the same `ServiceProvider`
-/// Singletons are NOT sound and will be removed or just enabled via feature-flag (see bellow). Regular users
-/// should use `Shared` instead, which ads a small runtime overhead.
+/// Singletons would not be sound if used as a dependency (see bellow), but can be used if they are used directly from 
+/// ServiceProvider::get(). Use `Shared` if you want it to be a dependency for another service.
+/// Update 2021-01-30: Currently no usecase for such
 /// 
-/// for `struct Service<'a>(&'a i32)`, `ServiceProvider::get<Singleton<Service>>()` returns `&'provider Service<'static>`
-/// but the inner i32 in fact just lives for 'provider.
+/// Imagine the following registration `collection.with::<Singleton<i32>>().register_singleton(|i| Service(i));`
+/// for `struct Service<'a>(&'a i32)`, `ServiceProvider::get<Singleton<Service>>()` would result in `&'provider Service<'static>`
+/// but the i32 in fact just lives for 'provider -> Unsound
 pub struct Singleton<T: Any>(PhantomData<T>);
 
 /// Represents a query for the last registered instance of `T` by value. 
@@ -91,10 +93,13 @@ impl<T> Deref for SharedServiceRef<T> {
     }
 }
 
+
+
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
     producers: Vec<(TypeId, *const dyn Fn())>,
+    // producers2: Vec<(TypeId, *const dyn Producer<Result=()>)>,
     dep_checkers: Vec<Box<dyn Fn(&ServiceCollection) -> Result<(), BuildError>>>
 }
 
@@ -103,6 +108,7 @@ impl ServiceCollection {
     pub fn new() -> Self {
         Self {
             producers: Vec::new(),
+            // producers2: Vec::new(),
             dep_checkers: Vec::new()
         }
     }
