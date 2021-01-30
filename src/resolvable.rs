@@ -117,9 +117,9 @@ impl Resolvable for ServiceProvider {
     }
 }
 
-impl<T: Any> resolvable::Resolvable for Arc<T> {
-    type Item = Option<Arc<IdFamily<T>>>;
-    type ItemPreChecked = Arc<IdFamily<T>>;
+impl<T: Any> resolvable::Resolvable for Shared<T> {
+    type Item = Option<SharedServiceRef<IdFamily<T>>>;
+    type ItemPreChecked = SharedServiceRef<IdFamily<T>>;
 
     fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         binary_search::binary_search_by_last_key(&provider.producers, &TypeId::of::<Self>(), |(id, _)| id)
@@ -222,8 +222,8 @@ impl<T: Any> GenericServices for TransientServices<T> {
 impl<T: Any> GenericServices for SingletonServices<T> {
     type Resolvable = Singleton<T>;
 }
-impl<T: Any> GenericServices for ArcServices<T> {
-    type Resolvable = Arc<T>;
+impl<T: Any> GenericServices for SharedServices<T> {
+    type Resolvable = Shared<T>;
 }
 
 impl<T: Any> resolvable::Resolvable for Transient<T> {

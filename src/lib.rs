@@ -35,7 +35,8 @@
 use {
     core::{
         marker::PhantomData,
-        any::{Any, TypeId}
+        any::{Any, TypeId},
+        ops::Deref
     },
     std::sync::Arc,
     family_lifetime::FamilyLt,
@@ -54,19 +55,42 @@ pub struct ServiceIterator<'a, T> {
     item_type: PhantomData<T>
 }
 
-/// Represents a Query for an instance of Type `T` which is shared for all calls to the same ServiceProvider
+/// Represents a query for the last registered instance of Type `T` which is shared for all calls to the same `ServiceProvider`
+/// Singletons are NOT sound and will be removed or just enabled via feature-flag (see bellow). Regular users
+/// should use `Shared` instead, which ads a small runtime overhead.
+/// 
+/// for `struct Service<'a>(&'a i32)`, `ServiceProvider::get<Singleton<Service>>()` returns `&'provider Service<'static>`
+/// but the inner i32 in fact just lives for 'provider.
 pub struct Singleton<T: Any>(PhantomData<T>);
 
-/// Represents a Query for an instance of `T` by value. 
+/// Represents a query for the last registered instance of `T` by value. 
 pub struct Transient<T: Any>(PhantomData<T>);
 
-/// Represents a Query for all registered instances of Type `T`. Each of those is shared for all calls to the same ServiceProvider
-pub struct TransientServices<T: Any>(PhantomData<T>);
-/// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
-pub struct SingletonServices<T: Any>(PhantomData<T>);
+/// Represents a query for the last registered instance of `T` which is shared for all calls to the same ServiceProvider. 
+pub struct Shared<T: Any>(PhantomData<T>);
 
-/// Represents a Query for all registered instances of Type `T`. The same Arc is shared for all calls to the same ServiceProvider
-pub struct ArcServices<T: Any>(PhantomData<T>);
+/// Represents a Query for all registered instances of Type `T`. The same instance is shared for all calls to the same ServiceProvider
+pub struct SingletonServices<T: Any>(PhantomData<T>);
+/// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
+pub struct TransientServices<T: Any>(PhantomData<T>);
+/// Represents a Query for all registered instances of Type `T`. The same instance is shared for all calls to the same ServiceProvider
+pub struct SharedServices<T: Any>(PhantomData<T>);
+
+/// Smart pointer representing a requested `Shared`. It is not allowed to keep any SharedServiceRef longer than the ServiceProvider
+/// it was received from. ServiceProvider panics when being dropped if any SharedServiceRef's are still alive.
+/// It doesn't support anything else but `core::ops::Deref`
+pub struct SharedServiceRef<T> {
+    store: Arc<T>
+}
+
+impl<T> Deref for SharedServiceRef<T> {
+    type Target = <Arc<T> as Deref>::Target;
+
+    fn deref(&self) -> &Self::Target {
+        self.store.deref()
+    }
+}
+
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
@@ -109,19 +133,21 @@ impl ServiceCollection {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    /// Registers a singleton service without dependencies. 
+    /// Registers a shared service without dependencies. 
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register_arc<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
+    pub fn register_shared<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
         let cell = once_cell::sync::OnceCell::new();
        
-        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |_container: &'a ServiceProvider| { 
-            cell.get_or_init(|| {
-                Arc::new(creator())
-            }).clone()            
+        let func : Box<dyn Fn(&'a ServiceProvider) -> SharedServiceRef<T>> = Box::new(move |_container: &'a ServiceProvider| { 
+            SharedServiceRef { 
+                store: cell.get_or_init(|| {
+                    Arc::new(creator())
+                }).clone()  
+            }          
         });
         
         self.producers.push((
-            TypeId::of::<Arc<T>>(), 
+            TypeId::of::<Shared<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
@@ -190,18 +216,20 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
-    pub fn register_arc<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
+    pub fn register_shared<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
-        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |container: &'a ServiceProvider| { 
-            cell.get_or_init(|| {
-                let arg = TDep::resolve_prechecked(container);
-                Arc::new(creator(arg))
-            }).clone()            
+        let func : Box<dyn Fn(&'a ServiceProvider) -> SharedServiceRef<T>> = Box::new(move |container: &'a ServiceProvider| { 
+            SharedServiceRef { 
+                store: cell.get_or_init(|| {
+                    let arg = TDep::resolve_prechecked(container);
+                    Arc::new(creator(arg))
+                }).clone()    
+            }        
         });
         
         self.0.producers.push((
-            TypeId::of::<Arc<T>>(), 
+            TypeId::of::<Shared<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
@@ -260,21 +288,21 @@ mod tests {
         let provider = col.build().expect("Expected to have all dependencies");
         let nr = provider.get::<Transient::<i32>>().unwrap();
         assert_eq!(2, nr);
-    }    
+    }   
 
     #[test]
-    fn resolve_arcs() {
+    fn resolve_shared() {
         let mut col = ServiceCollection::new();
-        col.register_arc(|| std::cell::RefCell::new(1));
-        col.with::<ServiceProvider>().register_arc(|_| std::cell::RefCell::new(2));
+        col.register_shared(|| std::cell::RefCell::new(1));
+        col.with::<ServiceProvider>().register_shared(|_| std::cell::RefCell::new(2));
 
         let prov = col.build().expect("Should have all Dependencies");
-        let second = prov.get::<Arc<std::cell::RefCell<i32>>>().expect("Expecte to get second");
+        let second = prov.get::<Shared<std::cell::RefCell<i32>>>().expect("Expecte to get second");
         assert_eq!(2, *second.borrow());
         second.replace(42);
 
         assert_eq!(
-            prov.get::<ArcServices<std::cell::RefCell<i32>>>()
+            prov.get::<SharedServices<std::cell::RefCell<i32>>>()
                 .map(|c| *c.borrow())
                 .sum::<i32>(),
             1 + 42
