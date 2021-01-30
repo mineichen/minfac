@@ -5,9 +5,9 @@ error[E0603]: module `resolvable` is private
    |                                            ^^^^^^^^^^ private module
    |
 note: the module `resolvable` is defined here
-  --> $DIR/lib.rs:46:1
+  --> $DIR/lib.rs:48:1
    |
-46 | mod resolvable;
+48 | mod resolvable;
    | ^^^^^^^^^^^^^^^
 
 error[E0599]: no function or associated item named `resolve` found for struct `Singleton<i32>` in the current scope

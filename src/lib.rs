@@ -3,26 +3,29 @@
 //! 
 //! Complete example:
 //! ```
-//! use ioc_rs::{ServiceCollection, ServiceProvider, Singleton, SingletonServices, Transient};
+//! use {
+//!     ioc_rs::{ServiceCollection, ServiceProvider, Shared, SharedServices, Transient},
+//!     std::sync::Arc
+//! };
 //! let mut collection = ioc_rs::ServiceCollection::new();
 //! 
 //! collection
 //!     .with::<Transient<i16>>()
 //!     .register_transient(|i| i as i32 * 2);
 //! collection
-//!     .with::<(ServiceProvider, SingletonServices<i8>, Transient<i32>)>()
+//!     .with::<(ServiceProvider, SharedServices<i8>, Transient<i32>)>()
 //!     .register_transient(|(provider, bytes, int)| {
 //!         provider.get::<Transient<i16>>().map(|i| i as i64).unwrap_or(1000) // Optional Dependency, fallback not used
 //!         + provider.get::<Transient<i128>>().map(|i| i as i64).unwrap_or(2000) // Optional Dependency, fallback
 //!         + bytes.map(|i| { *i as i64 }).sum::<i64>()
 //!         + int as i64 });
-//! collection.register_singleton(|| 1i8);
-//! collection.register_singleton(|| 2i8);
-//! collection.register_singleton(|| 3i8);
+//! collection.register_shared(|| 1i8);
+//! collection.register_shared(|| 2i8);
+//! collection.register_shared(|| 3i8);
 //! collection.register_transient(|| 4i16);
 //!
 //! let provider = collection.build().expect("All dependencies are resolvable");
-//! assert_eq!(Some(&3), provider.get::<Singleton<i8>>()); // Last registered i8
+//! assert_eq!(Some(Arc::new(3)), provider.get::<Shared<i8>>()); // Last registered i8
 //! assert_eq!(Some(4+2000+(1+2+3)+(2*4)), provider.get::<Transient<i64>>()); // composed i64
 //! ```
 //! # Notes
@@ -35,8 +38,7 @@
 use {
     core::{
         marker::PhantomData,
-        any::{Any, TypeId},
-        ops::Deref
+        any::{Any, TypeId}
     },
     std::sync::Arc,
     family_lifetime::FamilyLt,
@@ -75,14 +77,22 @@ pub struct Shared<T: Any>(PhantomData<T>);
 pub struct SingletonServices<T: Any>(PhantomData<T>);
 /// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
 pub struct TransientServices<T: Any>(PhantomData<T>);
+
 /// Represents a Query for all registered instances of Type `T`. The same instance is shared for all calls to the same ServiceProvider
 pub struct SharedServices<T: Any>(PhantomData<T>);
-
+/*
 /// Smart pointer representing a requested `Shared`. It is not allowed to keep any SharedServiceRef longer than the ServiceProvider
 /// it was received from. ServiceProvider panics when being dropped if any SharedServiceRef's are still alive.
 /// It doesn't support anything else but `core::ops::Deref`
-pub struct SharedServiceRef<T> {
+#[derive(Debug, PartialEq, Eq)]
+pub struct SharedServiceRef<T: ?Sized> {
     store: Arc<T>
+}
+
+impl<T> SharedServiceRef<T> {
+    pub fn casted<TOut: ?Sized>(&self, map: fn(Arc<T>) -> Arc<TOut>) -> SharedServiceRef<TOut> {
+        SharedServiceRef { store: (map)(self.store.clone()) }
+    }
 }
 
 impl<T> Deref for SharedServiceRef<T> {
@@ -92,8 +102,7 @@ impl<T> Deref for SharedServiceRef<T> {
         self.store.deref()
     }
 }
-
-
+*/
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
@@ -144,12 +153,10 @@ impl ServiceCollection {
     pub fn register_shared<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
         let cell = once_cell::sync::OnceCell::new();
        
-        let func : Box<dyn Fn(&'a ServiceProvider) -> SharedServiceRef<T>> = Box::new(move |_container: &'a ServiceProvider| { 
-            SharedServiceRef { 
-                store: cell.get_or_init(|| {
-                    Arc::new(creator())
-                }).clone()  
-            }          
+        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |_container: &'a ServiceProvider| { 
+            cell.get_or_init(|| {
+                Arc::new(creator())
+            }).clone()  
         });
         
         self.producers.push((
@@ -225,13 +232,11 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
     pub fn register_shared<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
         let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
-        let func : Box<dyn Fn(&'a ServiceProvider) -> SharedServiceRef<T>> = Box::new(move |container: &'a ServiceProvider| { 
-            SharedServiceRef { 
-                store: cell.get_or_init(|| {
-                    let arg = TDep::resolve_prechecked(container);
-                    Arc::new(creator(arg))
-                }).clone()    
-            }        
+        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |container: &'a ServiceProvider| { 
+            cell.get_or_init(|| {
+                let arg = TDep::resolve_prechecked(container);
+                Arc::new(creator(arg))
+            }).clone()   
         });
         
         self.0.producers.push((
@@ -361,13 +366,13 @@ mod tests {
     }
 
     #[test]
-    fn resolve_last_singleton() {
+    fn resolve_last_shared() {
         let mut container = ServiceCollection::new();
-        container.register_singleton(|| 0);
-        container.register_singleton(|| 1);
-        container.register_singleton(|| 2);
+        container.register_shared(|| 0);
+        container.register_shared(|| 1);
+        container.register_shared(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
-        let nr_ref = provider.get::<Singleton::<i32>>().unwrap();
+        let nr_ref = provider.get::<Shared::<i32>>().unwrap();
         assert_eq!(2, *nr_ref);
     }
 
@@ -403,52 +408,46 @@ mod tests {
         assert_eq!(None, iter.next());     
     }
     #[test]
-    fn resolve_singleton_services() {
+    fn resolve_shared_services() {
         let mut container = ServiceCollection::new();
-        container.register_singleton(|| 0);
-        container.register_singleton(|| 5);
-        container.register_singleton(|| 2);
+        container.register_shared(|| 0);
+        container.register_shared(|| 5);
+        container.register_shared(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = provider.get::<SingletonServices<i32>>();
+        let mut count_subset = provider.get::<SharedServices<i32>>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
-        assert_eq!(3, provider.get::<SingletonServices::<i32>>().count());
+        assert_eq!(3, provider.get::<SharedServices::<i32>>().count());
 
         // Last
-        assert_eq!(&2, provider.get::<SingletonServices<i32>>().last().unwrap());
+        assert_eq!(2, *provider.get::<SharedServices<i32>>().last().unwrap());
         
-        let mut sub = provider.get::<SingletonServices::<i32>>();
+        let mut sub = provider.get::<SharedServices::<i32>>();
         sub.next();
-        assert_eq!(Some(&2), sub.last());
+        assert_eq!(Some(2), sub.last().map(|i| *i));
 
-        let mut consumed = provider.get::<SingletonServices::<i32>>();
+        let mut consumed = provider.get::<SharedServices::<i32>>();
         consumed.by_ref().for_each(|_| {});
         assert_eq!(None, consumed.last());
         
-        let mut iter = provider.get::<SingletonServices::<i32>>();
-        assert_eq!(Some(&0), iter.next());
-        assert_eq!(Some(&5), iter.next());
-        assert_eq!(Some(&2), iter.next());
+        let mut iter = provider.get::<SharedServices::<i32>>().map(|i| *i);
+        assert_eq!(Some(0), iter.next());
+        assert_eq!(Some(5), iter.next());
+        assert_eq!(Some(2), iter.next());
         assert_eq!(None, iter.next());     
-    }
-    /*
-    fn resolve_services<TInner, T>(m: for<'a> fn(<TInner::ItemPreChecked as FamilyLt<'a>>::Out) -> i32) 
-        where TInner: Resolvable, 
-            T: Resolvable<Item=ServiceIteratorFamily<TInner>> 
-    { */
-    
+    }    
 
     #[test]
     fn resolve_test() {
         let mut container = ServiceCollection::new();
         container.register_transient(|| 42);
-        container.register_singleton(|| 42);
+        container.register_shared(|| 42);
         let provider = container.build().expect("Expected to have all dependencies");
         assert_eq!(
             provider.get::<Transient::<i32>>().unwrap(), 
-            provider.get::<Singleton::<i32>>().map(|f| *f).unwrap()
+            provider.get::<Shared::<i32>>().map(|f| *f).unwrap()
         );
     }
 
@@ -466,24 +465,31 @@ mod tests {
     #[test]
     fn get_registered_dynamic_ref() {
         let mut container = ServiceCollection::new();
-        container.register_singleton(|| 42);
+        container.register_shared(|| 42);
         assert_eq!(
-            Some(&42i32), 
+            Some(42i32), 
             container.build()
                 .expect("Expected to have all dependencies")
-                .get::<Singleton<i32>>());
+                .get::<Shared<i32>>().map(|i| *i)
+        );
     }
 
     #[test]
     fn tuple_dependency_resolves_to_prechecked_type() {
         let mut container = ServiceCollection::new();
         container.register_transient(|| 64i64);
-        container.with::<(Transient<i64>, Transient<i64>)>().register_singleton(|(a, b)| {
+        container.with::<(Transient<i64>, Transient<i64>)>().register_shared(|(a, b)| {
             assert_eq!(64, a);
             assert_eq!(64, b);
             42
         });
-        assert_eq!(Some(&42i32), container.build().expect("Expected to have all dependencies").get::<Singleton<i32>>());
+        assert_eq!(
+            Some(42i32), 
+            container.build()
+                .expect("Expected to have all dependencies")
+                .get::<Shared<i32>>()
+                .map(|i| *i)
+        );
     }
 
     #[test]
@@ -501,23 +507,24 @@ mod tests {
     fn resolve_tuple_2() {
         let mut container = ServiceCollection::new();
         container.register_transient(|| 32i32);
-        container.register_singleton(|| 64i64);
-        assert_eq!(
-            (Some(32), Some(&64)), 
-            container.build()
-                .expect("Expected to have all dependencies")
-                .get::<(Transient<i32>, Singleton<i64>)>()
-        );
+        container.register_shared(|| 64i64);
+        let (a, b) = container.build()
+            .expect("Expected to have all dependencies")
+            .get::<(Transient<i32>, Shared<i64>)>();
+        assert_eq!(Some(32), a);
+        assert_eq!(Some(64), b.map(|i| *i));
     }
+
+    
 
     #[test]
     fn register_struct_as_dynamic() {
         let mut container = ServiceCollection::new();   
-        container.register_singleton(|| 42i32);
-        container.with::<Singleton<i32>>().register_singleton(|i| ServiceImpl(i));
-        container.with::<Singleton<ServiceImpl>>().register_transient(|c| c as &dyn Service);
+        container.register_shared(|| 42i32);
+        container.with::<Shared<i32>>().register_shared(|i| ServiceImpl(i));
+        container.with::<Shared<ServiceImpl<Arc<i32>>>>().register_transient(|c| c as Arc<dyn Service>);
         let provider = container.build().expect("Expected to have all dependencies");
-        let service = provider.get::<Transient<&dyn Service>>()
+        let service = provider.get::<Transient<Arc<dyn Service>>>()
             .expect("Expected to get a service");
        
         assert_eq!(42, service.get_value());
@@ -527,8 +534,8 @@ mod tests {
         fn get_value(&self) -> i32;
     }
 
-    struct ServiceImpl<'a>(&'a i32);
-    impl<'a> Service for ServiceImpl<'a> {
+    struct ServiceImpl<T: core::ops::Deref<Target=i32>>(T);
+    impl<T: core::ops::Deref<Target=i32>> Service for ServiceImpl<T> {
         fn get_value(&self) -> i32 {
             println!("Before getting");
             *self.0
@@ -536,17 +543,17 @@ mod tests {
     }
 
     #[test]
-    fn drop_singletons_after_provider_drop() {
+    fn drop_shareds_after_provider_drop() {
         let mut col = ServiceCollection::new();
-        col.register_singleton(|| Test);
+        col.register_shared(|| Test);
         let prov = col.build().unwrap();
         drop(prov);
         assert_eq!(0, unsafe { DROP_COUNT });
         
         let mut col = ServiceCollection::new();
-        col.register_singleton(|| Test);
+        col.register_shared(|| Test);
         let prov = col.build().expect("Expected to have all dependencies");
-        prov.get::<Singleton<Test>>().expect("Expected to receive the service");
+        prov.get::<Shared<Test>>().expect("Expected to receive the service");
         drop(prov);
         assert_eq!(1, unsafe { DROP_COUNT });
     }

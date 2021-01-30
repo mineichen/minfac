@@ -1,5 +1,3 @@
-use crate::SharedServiceRef;
-
 use {
     core::{
         any::Any,
@@ -29,9 +27,7 @@ impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for Option<T> {
 impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for std::sync::Arc<T> {
     type Out = std::sync::Arc<T::Out>;
 }
-impl<'a, T: FamilyLt<'a> + 'a> FamilyLt<'a> for SharedServiceRef<T> {
-    type Out = SharedServiceRef<T::Out>;
-}
+
 
 impl<'a, T0: FamilyLt<'a> + 'a, T1: FamilyLt<'a> + 'a> FamilyLt<'a> for (T0, T1) {
     type Out = (

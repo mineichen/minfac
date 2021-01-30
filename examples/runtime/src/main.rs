@@ -1,18 +1,18 @@
-extern crate libloading as lib;
+use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let lib = lib::Library::new("target/debug/libplugin.dylib")?;
+    let lib = libloading::Library::new("target/debug/libplugin.dylib")?;
     let mut container = ioc_rs::ServiceCollection::new();
     container.register_transient(|| 42);
     unsafe {
-        let func: lib::Symbol<unsafe extern fn(&mut ioc_rs::ServiceCollection)> = lib.get(b"register")?;
+        let func: libloading::Symbol<unsafe extern fn(&mut ioc_rs::ServiceCollection)> = lib.get(b"register")?;
         func(&mut container);
     }
     let provider = container.build().expect("Expected all dependencies to resolve");
 
     
     let service = provider
-        .get::<ioc_rs::Transient<&dyn interface::Service>>()
+        .get::<ioc_rs::Transient<Arc<dyn interface::Service>>>()
         .expect("Expected plugin to register a &dyn Service");
     println!("Runtime: service.call(2) = {}", service.call(2));
     

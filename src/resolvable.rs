@@ -118,8 +118,8 @@ impl Resolvable for ServiceProvider {
 }
 
 impl<T: Any> resolvable::Resolvable for Shared<T> {
-    type Item = Option<SharedServiceRef<IdFamily<T>>>;
-    type ItemPreChecked = SharedServiceRef<IdFamily<T>>;
+    type Item = Option<Arc<IdFamily<T>>>;
+    type ItemPreChecked = Arc<IdFamily<T>>;
 
     fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
         binary_search::binary_search_by_last_key(&provider.producers, &TypeId::of::<Self>(), |(id, _)| id)
