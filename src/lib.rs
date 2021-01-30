@@ -57,24 +57,12 @@ pub struct ServiceIterator<'a, T> {
     item_type: PhantomData<T>
 }
 
-/// Represents a query for the last registered instance of Type `T` which is shared for all calls to the same `ServiceProvider`
-/// Singletons would not be sound if used as a dependency (see bellow), but can be used if they are used directly from 
-/// ServiceProvider::get(). Use `Shared` if you want it to be a dependency for another service.
-/// Update 2021-01-30: Currently no usecase for such
-/// 
-/// Imagine the following registration `collection.with::<Singleton<i32>>().register_singleton(|i| Service(i));`
-/// for `struct Service<'a>(&'a i32)`, `ServiceProvider::get<Singleton<Service>>()` would result in `&'provider Service<'static>`
-/// but the i32 in fact just lives for 'provider -> Unsound
-pub struct Singleton<T: Any>(PhantomData<T>);
-
 /// Represents a query for the last registered instance of `T` by value. 
 pub struct Transient<T: Any>(PhantomData<T>);
 
 /// Represents a query for the last registered instance of `T` which is shared for all calls to the same ServiceProvider. 
 pub struct Shared<T: Any>(PhantomData<T>);
 
-/// Represents a Query for all registered instances of Type `T`. The same instance is shared for all calls to the same ServiceProvider
-pub struct SingletonServices<T: Any>(PhantomData<T>);
 /// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
 pub struct TransientServices<T: Any>(PhantomData<T>);
 
@@ -165,26 +153,6 @@ impl ServiceCollection {
         ));
     }
 
-    /// Registers a singleton service without dependencies. 
-    /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn() -> T) {
-        let cell = once_cell::sync::OnceCell::new();
-        
-        let func : Box<dyn Fn(&'a ServiceProvider) -> &'a T> = Box::new(move |_: &'a ServiceProvider| { 
-            unsafe { 
-                // Deref is valid because provider never alters any producers
-                // Unless destroying itself
-                &*(cell.get_or_init(|| {
-                    creator()
-                }) as *const T) as &'a T
-            }
-        });
-        
-        self.producers.push((
-            TypeId::of::<Singleton<T>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
-    }
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(mut self) -> Result<ServiceProvider, BuildError> {
@@ -241,26 +209,6 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         
         self.0.producers.push((
             TypeId::of::<Shared<T>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
-    }
-    
-    pub fn register_singleton<'s, 'a: 's, T: Any + Sync>(&'s mut self, creator: fn(<TDep::ItemPreChecked as FamilyLt<'a>>::Out) -> T) {
-        let cell = once_cell::sync::OnceCell::new();
-        TDep::add_resolvable_checker(&mut self.0);
-        let func : Box<dyn Fn(&'a ServiceProvider) -> &T> = Box::new(move |container: &'a ServiceProvider| { 
-            unsafe { 
-                // Deref is valid because provider never alters any producers
-                // Unless destroying itself
-                &*(cell.get_or_init(|| {
-                    let arg = TDep::resolve_prechecked(container);
-                    creator(arg)
-                }) as *const T)
-            }
-        });
-        
-        self.0.producers.push((
-            TypeId::of::<Singleton<T>>(), 
             Box::into_raw(func) as *const dyn Fn()
         ));
     }
@@ -326,7 +274,7 @@ mod tests {
     }
     #[test]
     fn build_with_missing_singleton_dep_fails() {
-        build_with_missing_dependency_fails::<Singleton<String>>(&["Singleton", "String"]);
+        build_with_missing_dependency_fails::<Shared<String>>(&["Shared", "String"]);
     }
     #[test]
     fn build_with_missing_tuple2_dep_fails() {
@@ -361,7 +309,7 @@ mod tests {
         check(col, missing_msg_parts);
 
         let mut col = ServiceCollection::new();
-        col.with::<T>().register_singleton(|_| ());
+        col.with::<T>().register_shared(|_| ());
         check(col, missing_msg_parts);        
     }
 

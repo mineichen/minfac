@@ -1,8 +1,8 @@
 error[E0603]: module `resolvable` is private
-  --> $DIR/call_resolve_directly.rs:1:44
+  --> $DIR/call_resolve_directly.rs:1:41
    |
-1  | use ioc_rs::{ServiceCollection, Singleton, resolvable::Resolvable};
-   |                                            ^^^^^^^^^^ private module
+1  | use ioc_rs::{ServiceCollection, Shared, resolvable::Resolvable};
+   |                                         ^^^^^^^^^^ private module
    |
 note: the module `resolvable` is defined here
   --> $DIR/lib.rs:48:1
@@ -10,11 +10,11 @@ note: the module `resolvable` is defined here
 48 | mod resolvable;
    | ^^^^^^^^^^^^^^^
 
-error[E0599]: no function or associated item named `resolve` found for struct `Singleton<i32>` in the current scope
- --> $DIR/call_resolve_directly.rs:6:23
+error[E0599]: no function or associated item named `resolve` found for struct `Shared<i32>` in the current scope
+ --> $DIR/call_resolve_directly.rs:6:20
   |
-6 |     Singleton::<i32>::resolve(&provider);
-  |                       ^^^^^^^ function or associated item not found in `Singleton<i32>`
+6 |     Shared::<i32>::resolve(&provider);
+  |                    ^^^^^^^ function or associated item not found in `Shared<i32>`
   |
   = help: items from traits can only be used if the trait is in scope
 help: the following trait is implemented but not in scope; perhaps add a `use` for it:

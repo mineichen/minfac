@@ -136,25 +136,6 @@ impl<T: Any> resolvable::Resolvable for Shared<T> {
     }
 }
 
-impl<T: Any> resolvable::Resolvable for Singleton<T> {
-    type Item = Option<RefFamily<T>>;
-    type ItemPreChecked = RefFamily<T>;
-
-    fn resolve<'s>(provider: &'s ServiceProvider) -> <Self::Item as FamilyLt<'s>>::Out {
-        binary_search::binary_search_by_last_key(&provider.producers, &TypeId::of::<Self>(), |(id, _)| id)
-            .map(|f| {  
-                unsafe { resolve_unchecked::<Self>(provider, f) }
-            })
-    }
-
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> <Self::ItemPreChecked as FamilyLt<'s>>::Out {
-        Self::resolve(provider).unwrap()
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        add_dynamic_checker::<Self>(col)
-    }
-}
-
 /// pos must be a valid index in provider.producers
 unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(provider: &'a ServiceProvider, pos: usize) -> <T::ItemPreChecked as FamilyLt<'a>>::Out {
     ({
@@ -219,9 +200,7 @@ impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices 
 impl<T: Any> GenericServices for TransientServices<T> {
     type Resolvable = Transient<T>;
 }
-impl<T: Any> GenericServices for SingletonServices<T> {
-    type Resolvable = Singleton<T>;
-}
+
 impl<T: Any> GenericServices for SharedServices<T> {
     type Resolvable = Shared<T>;
 }
