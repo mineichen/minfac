@@ -53,5 +53,5 @@ impl<'a, T0: FamilyLt<'a>, T1: FamilyLt<'a>, T2: FamilyLt<'a>, T3: FamilyLt<'a>>
 pub struct ServiceIteratorFamily<T>(PhantomData<T>);
 
 impl<'a, T: crate::resolvable::Resolvable> FamilyLt<'a> for ServiceIteratorFamily<T> {
-    type Out = crate::ServiceIterator<'a, T>;
+    type Out = crate::ServiceIterator<T>;
 }
