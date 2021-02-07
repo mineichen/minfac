@@ -46,7 +46,6 @@ use {
 
 mod resolvable;
 mod binary_search;
-mod family_lifetime;
 
 
 /// Represents instances of a type `T` within a `ServiceProvider`
