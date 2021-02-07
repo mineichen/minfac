@@ -113,25 +113,6 @@ impl Resolvable for ServiceProvider {
     }
 }
 
-impl<T: Any> resolvable::Resolvable for Shared<T> {
-    type Item = Option<T>;
-    type ItemPreChecked = T;
-
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item {
-        binary_search::binary_search_by_last_key(&provider.producers, &TypeId::of::<Self>(), |(id, _)| id)
-            .map(|f| {  
-                unsafe { resolve_unchecked::<Self>(provider, f) }
-            })
-    }
-
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked {
-        Self::resolve(provider).unwrap()
-    }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        add_dynamic_checker::<Self>(col)
-    }
-}
-
 /// pos must be a valid index in provider.producers
 unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(provider: &'a ServiceProvider, pos: usize) -> T::ItemPreChecked {
     ({
@@ -200,15 +181,11 @@ impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices 
         Self::resolve(container)
     }
 }
-impl<T: Any> GenericServices for TransientServices<T> {
-    type Resolvable = Transient<T>;
+impl<T: Any> GenericServices for DynamicServices<T> {
+    type Resolvable = Dynamic<T>;
 }
 
-impl<T: Any> GenericServices for SharedServices<T> {
-    type Resolvable = Shared<T>;
-}
-
-impl<T: Any> resolvable::Resolvable for Transient<T> {
+impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
 
