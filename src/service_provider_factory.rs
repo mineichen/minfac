@@ -1,5 +1,5 @@
 use {
-    crate::{ServiceCollection, ServiceProvider, BuildError, Dynamic},
+    crate::{ServiceCollection, ServiceProvider, Dynamic},
     core::{
         clone::Clone,
         marker::PhantomData,
@@ -30,21 +30,10 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
 
         collection.producers.push((t_type_id, function_pointer));
         let producers = collection.extract_ordered_producers();
-        //let invalid_position = producers
-        //    .binary_search_by_key(&function_pointer, |i| i.1)
-        //    .unwrap();
 
         let mut unresolvable_errors = collection.dep_checkers
             .iter()
-            .filter_map(|checker| {
-                let error = (checker)(&producers);
-                if let Some(BuildError::MissingDependency(info)) = &error {
-                    if info.typeid == t_type_id {
-                        return None;
-                    }
-                }
-                error
-            });
+            .filter_map(|checker| (checker)(&producers));
 
         match unresolvable_errors.next() {
             Some(err) => {
