@@ -49,7 +49,6 @@ mod resolvable;
 mod binary_search;
 mod service_provider_factory;
 
-
 /// Represents instances of a type `T` within a `ServiceProvider`
 pub struct ServiceIterator<T> {
     next_pos: Option<usize>,
@@ -66,9 +65,29 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
-    producers: Vec<(TypeId, *const dyn Fn())>,
+    producers: Vec<UntypedFn>,
     // producers2: Vec<(TypeId, *const dyn Producer<Result=()>)>,
-    dep_checkers: Vec<Box<dyn Fn(&Vec<(TypeId, *const dyn Fn())>) -> Option<BuildError>>>
+    dep_checkers: Vec<Box<dyn Fn(&Vec<UntypedFn>) -> Option<BuildError>>>
+}
+
+struct UntypedFn {
+    result_type_id: TypeId,
+    pointer: *const dyn Fn()
+}
+
+impl<T: Any> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn where T: Any {
+    fn from(factory: Box<dyn Fn(&ServiceProvider) -> T>) -> Self {
+        UntypedFn {
+            result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
+            pointer: Box::into_raw(factory) as *const dyn Fn()
+        }
+    }
+}
+
+impl Drop for UntypedFn {
+    fn drop(&mut self) {
+        unsafe { core::ptr::drop_in_place(self.pointer as *mut dyn Fn()) };
+    }
 }
 
 impl ServiceCollection {
@@ -81,13 +100,6 @@ impl ServiceCollection {
         }
     }
 } 
-impl Drop for ServiceCollection {
-    fn drop(&mut self) {
-        for p in self.producers.iter_mut() {
-            unsafe { core::ptr::drop_in_place(p.1 as *mut dyn Fn()) };
-        }
-    }
-}
 
 impl ServiceCollection {
     /// Generate a ServiceBuilder with `T` as a dependency.
@@ -98,67 +110,59 @@ impl ServiceCollection {
     /// Registers a transient service without dependencies. 
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
-        let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |_: &'a ServiceProvider| {
+        let func : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |_: &ServiceProvider| {
             creator()
         });
         
-        self.producers.push((
-            TypeId::of::<Dynamic<T>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
+        self.producers.push(func.into());
     }
     /// Registers a shared service without dependencies. 
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register_shared<'s, 'a: 's, T: Any + ?Sized>(&'s mut self, creator: fn() -> Arc<T>) {
         let cell = once_cell::sync::OnceCell::new();
        
-        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |_container: &'a ServiceProvider| { 
+        let func : Box<dyn Fn(&ServiceProvider) -> Arc<T>> = Box::new(move |_container: &ServiceProvider| { 
             cell.get_or_init(|| {
                 creator()
             }).clone()  
         });
         
-        self.producers.push((
-            TypeId::of::<Dynamic<Arc<T>>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
+        self.producers.push(func.into());
     }
 
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
-    pub fn build(mut self) -> Result<ServiceProvider, BuildError> {
-        let mut producers = self.extract_ordered_producers();
-
-        if let Some(err) = self.dep_checkers.iter().filter_map(|checker| (checker)(&mut producers)).next() {
-            return Err(err)
-        }
-
-        Ok (ServiceProvider { producers: Arc::new(producers), is_root: true, root: Arc::new(()) })
+    pub fn build(self) -> Result<ServiceProvider, BuildError> {
+        let producers = self.validate_producers()?;
+        Ok (ServiceProvider { producers: Arc::new(producers), initial_state: Arc::new(()) })
     }
 
     pub fn build_factory<T: Clone + Any>(self) -> Result<service_provider_factory::ServiceProviderFactory<T>, BuildError> {
         service_provider_factory::ServiceProviderFactory::create(self)
     }
  
-    fn extract_ordered_producers(&mut self) -> Vec<(TypeId, *const dyn Fn())> {
-        self.producers.sort_by_key(|(id,_)| *id);
+    fn validate_producers(mut self) -> Result<Vec<UntypedFn>, BuildError> {
+        self.producers.sort_by_key(|a| a.result_type_id);
         let mut producers = Vec::new();
         core::mem::swap(&mut self.producers, &mut producers);
-        producers
+        if let Some(err) = self.dep_checkers.iter().filter_map(|checker| (checker)(&mut producers)).next() {
+            return Err(err)
+        }
+        Ok(producers)
     }
 }
 
-/// Possible errors when calling ServiceCollection::build()
+/// Possible errors when calling ServiceCollection::build() or ServiceCollection::build_factory()
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuildError {
-    MissingDependency(MissingDependencyInfos),
+    MissingDependency(MissingDependencyType),
     CyclicDependency(String)
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct MissingDependencyInfos {
-    typeid: TypeId,
-    typename: &'static str
+pub struct MissingDependencyType {
+    id: TypeId,
+    name: &'static str
 }
 
 pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
@@ -166,50 +170,34 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
     pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
         
-        let func : Box<dyn Fn(&'a ServiceProvider) -> T> = Box::new(move |container: &'a ServiceProvider| {
+        let func : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |container: &ServiceProvider| {
             let arg = TDep::resolve_prechecked(container);
             creator(arg)
         });
         
-        self.0.producers.push((
-            TypeId::of::<Dynamic<T>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
+        self.0.producers.push(func.into());
     }
     pub fn register_shared<'s, 'a: 's, T: Any + ?Sized>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
-        let func : Box<dyn Fn(&'a ServiceProvider) -> Arc<T>> = Box::new(move |container: &'a ServiceProvider| { 
+        let func : Box<dyn Fn(&ServiceProvider) -> Arc<T>> = Box::new(move |container: &ServiceProvider| { 
             cell.get_or_init(|| {
                 let arg = TDep::resolve_prechecked(container);
                 creator(arg)
             }).clone()   
         });
         
-        self.0.producers.push((
-            TypeId::of::<Dynamic<Arc<T>>>(), 
-            Box::into_raw(func) as *const dyn Fn()
-        ));
+        self.0.producers.push(func.into());
     }
 }
 
 pub struct ServiceProvider {
     
-    root: Arc<()>,
+    initial_state: Arc<()>,
     /// Mustn't be changed because `resolve_unchecked` relies on it.
-    producers: Arc<Vec<(TypeId, *const dyn Fn())>>,
-    is_root: bool
+    producers: Arc<Vec<UntypedFn>>
 }
 
-impl Drop for ServiceProvider {
-    fn drop(&mut self) {
-        if self.is_root {
-            for p in self.producers.iter() {
-                unsafe { drop(Box::from_raw(p.1 as *mut dyn Fn())) };
-            }
-        }
-    }
-}
 
 impl ServiceProvider {
     pub fn get<'s, T: Resolvable>(&'s self) -> T::Item {
@@ -279,7 +267,7 @@ mod tests {
                 Err(e) => match e {
                     BuildError::MissingDependency(msg) => {
                         for part in missing_msg_parts {
-                            assert!(msg.typename.contains(part), "Expected '{}' to contain '{}'", msg.typename, part);
+                            assert!(msg.name.contains(part), "Expected '{}' to contain '{}'", msg.name, part);
                         }
                     },
                     _ => panic!("Unexpected Error")

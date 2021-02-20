@@ -108,8 +108,7 @@ impl Resolvable for ServiceProvider {
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> Self::ItemPreChecked {
         ServiceProvider { 
             producers: container.producers.clone(),
-            is_root: false,
-            root: container.root.clone()
+            initial_state: container.initial_state.clone()
         }
     }
 }
@@ -118,8 +117,8 @@ impl Resolvable for ServiceProvider {
 unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(provider: &'a ServiceProvider, pos: usize) -> T::ItemPreChecked {
     ({
         let entry = provider.producers.get_unchecked(pos);
-        debug_assert_eq!(entry.0, TypeId::of::<T>());
-        let func_ptr = entry.1 as *const dyn Fn(&'a ServiceProvider) -> T::ItemPreChecked;
+        debug_assert_eq!(entry.result_type_id, TypeId::of::<T>());
+        let func_ptr = entry.pointer as *const dyn Fn(&'a ServiceProvider) -> T::ItemPreChecked;
         &* func_ptr
     })(&provider)
 }
@@ -130,7 +129,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.next_pos.map(|i| {
             self.next_pos = if let Some(next) = self.provider.producers.get(i + 1) {
-                if next.0 == TypeId::of::<T>() { 
+                if next.result_type_id == TypeId::of::<T>() { 
                     Some(i + 1) 
                 } else {
                     None
@@ -146,13 +145,13 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     fn last(self) -> Option<Self::Item> where Self: Sized {
         self.next_pos.map(|i| {
             // If has_next, last must exist
-            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
+            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |f| &f.result_type_id).unwrap();
             unsafe { resolve_unchecked::<T>(&self.provider, i+pos)}            
         }) 
     }
     fn count(self) -> usize where Self: Sized {
         self.next_pos.map(|i| {
-            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |(id, _)| id).unwrap();
+            let pos = binary_search::binary_search_by_last_key(&self.provider.producers[i..], &TypeId::of::<T>(), |f| &f.result_type_id).unwrap();
             pos + 1       
         }).unwrap_or(0)
     }
@@ -167,12 +166,11 @@ impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices 
     type ItemPreChecked = ServiceIterator<TServices::Resolvable>;
 
     fn resolve<'s>(container: &'s ServiceProvider) -> Self::Item {
-        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |(id, _)| id);
+        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |f| &f.result_type_id);
         ServiceIterator { 
             provider: ServiceProvider {
-                root: container.root.clone(),
-                producers: container.producers.clone(),
-                is_root: false
+                initial_state: container.initial_state.clone(),
+                producers: container.producers.clone()
             }, 
             item_type: PhantomData, 
             next_pos
@@ -192,7 +190,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type ItemPreChecked = T;
 
     fn resolve<'s>(container: &'s ServiceProvider) -> Self::Item {
-        binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |(id, _)| id)
+        binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |f| &f.result_type_id)
             .map(|f| {    
                 unsafe { resolve_unchecked::<Self>(container, f) }
             })
@@ -208,12 +206,12 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
 
 fn add_dynamic_checker<T: resolvable::Resolvable>(col: &mut ServiceCollection) {
     col.dep_checkers.push(Box::new(|producers| { 
-        match producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }) {
+        match producers[..].binary_search_by_key(&TypeId::of::<T>(), |f| f.result_type_id) {
             Ok(_) => None,
             Err(_) => Some(BuildError::MissingDependency(
-                MissingDependencyInfos { 
-                    typename: std::any::type_name::<T>(), 
-                    typeid: std::any::TypeId::of::<T>()
+                MissingDependencyType { 
+                    name: std::any::type_name::<T>(), 
+                    id: std::any::TypeId::of::<T>()
                 } ))
         }
     }));
