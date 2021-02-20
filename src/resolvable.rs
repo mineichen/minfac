@@ -108,7 +108,8 @@ impl Resolvable for ServiceProvider {
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> Self::ItemPreChecked {
         ServiceProvider { 
             producers: container.producers.clone(),
-            is_root: false
+            is_root: false,
+            root: container.root.clone()
         }
     }
 }
@@ -169,6 +170,7 @@ impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices 
         let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |(id, _)| id);
         ServiceIterator { 
             provider: ServiceProvider {
+                root: container.root.clone(),
                 producers: container.producers.clone(),
                 is_root: false
             }, 
@@ -205,11 +207,14 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
 }
 
 fn add_dynamic_checker<T: resolvable::Resolvable>(col: &mut ServiceCollection) {
-    col.dep_checkers.push(Box::new(|col| { 
-        match col.producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(BuildError::MissingDependency(
-                MissingDependencyInfos { missing: std::any::type_name::<T>() } ))
+    col.dep_checkers.push(Box::new(|producers| { 
+        match producers[..].binary_search_by_key(&TypeId::of::<T>(), |(id, _)| { *id }) {
+            Ok(_) => None,
+            Err(_) => Some(BuildError::MissingDependency(
+                MissingDependencyInfos { 
+                    typename: std::any::type_name::<T>(), 
+                    typeid: std::any::TypeId::of::<T>()
+                } ))
         }
     }));
 }

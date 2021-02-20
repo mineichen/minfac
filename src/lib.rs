@@ -35,6 +35,7 @@
 //! 
 //! Visit the documentation for more details
 
+
 use {
     core::{
         marker::PhantomData,
@@ -46,6 +47,7 @@ use {
 
 mod resolvable;
 mod binary_search;
+mod service_provider_factory;
 
 
 /// Represents instances of a type `T` within a `ServiceProvider`
@@ -66,7 +68,7 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 pub struct ServiceCollection {
     producers: Vec<(TypeId, *const dyn Fn())>,
     // producers2: Vec<(TypeId, *const dyn Producer<Result=()>)>,
-    dep_checkers: Vec<Box<dyn Fn(&ServiceCollection) -> Result<(), BuildError>>>
+    dep_checkers: Vec<Box<dyn Fn(&Vec<(TypeId, *const dyn Fn())>) -> Option<BuildError>>>
 }
 
 impl ServiceCollection {
@@ -82,7 +84,7 @@ impl ServiceCollection {
 impl Drop for ServiceCollection {
     fn drop(&mut self) {
         for p in self.producers.iter_mut() {
-            unsafe { drop(Box::from_raw(p.1 as *mut dyn Fn())) };
+            unsafe { core::ptr::drop_in_place(p.1 as *mut dyn Fn()) };
         }
     }
 }
@@ -125,16 +127,24 @@ impl ServiceCollection {
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(mut self) -> Result<ServiceProvider, BuildError> {
-        self.producers.sort_by_key(|(id,_)| *id);
-        let mut producers = Vec::new();
-        let mut dep_checkers = Vec::new();
-        core::mem::swap(&mut self.dep_checkers, &mut dep_checkers);
-        for checker in dep_checkers.iter() {
-            (checker)(&mut self)?;
+        let mut producers = self.extract_ordered_producers();
+
+        if let Some(err) = self.dep_checkers.iter().filter_map(|checker| (checker)(&mut producers)).next() {
+            return Err(err)
         }
 
+        Ok (ServiceProvider { producers: Arc::new(producers), is_root: true, root: Arc::new(()) })
+    }
+
+    pub fn build_factory<T: Clone + Any>(self) -> Result<service_provider_factory::ServiceProviderFactory<T>, BuildError> {
+        service_provider_factory::ServiceProviderFactory::create(self)
+    }
+ 
+    fn extract_ordered_producers(&mut self) -> Vec<(TypeId, *const dyn Fn())> {
+        self.producers.sort_by_key(|(id,_)| *id);
+        let mut producers = Vec::new();
         core::mem::swap(&mut self.producers, &mut producers);
-        Ok (ServiceProvider { producers: Arc::new(producers), is_root: true })
+        producers
     }
 }
 
@@ -147,7 +157,8 @@ pub enum BuildError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MissingDependencyInfos {
-    missing: &'static str
+    typeid: TypeId,
+    typename: &'static str
 }
 
 pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
@@ -181,7 +192,10 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         ));
     }
 }
+
 pub struct ServiceProvider {
+    
+    root: Arc<()>,
     /// Mustn't be changed because `resolve_unchecked` relies on it.
     producers: Arc<Vec<(TypeId, *const dyn Fn())>>,
     is_root: bool
@@ -265,7 +279,7 @@ mod tests {
                 Err(e) => match e {
                     BuildError::MissingDependency(msg) => {
                         for part in missing_msg_parts {
-                            assert!(msg.missing.contains(part), "Expected '{}' to contain '{}'", msg.missing, part);
+                            assert!(msg.typename.contains(part), "Expected '{}' to contain '{}'", msg.typename, part);
                         }
                     },
                     _ => panic!("Unexpected Error")
