@@ -11,18 +11,18 @@
 //! 
 //! collection
 //!     .with::<Dynamic<i16>>()
-//!     .register_transient(|i| i as i32 * 2);
+//!     .register(|i| i as i32 * 2);
 //! collection
 //!     .with::<(ServiceProvider, DynamicServices<Arc<i8>>, Dynamic<i32>)>()
-//!     .register_transient(|(provider, bytes, int)| {
+//!     .register(|(provider, bytes, int)| {
 //!         provider.get::<Dynamic<i16>>().map(|i| i as i64).unwrap_or(1000) // Optional Dependency, fallback not used
 //!         + provider.get::<Dynamic<i128>>().map(|i| i as i64).unwrap_or(2000) // Optional Dependency, fallback
 //!         + bytes.map(|i| { *i as i64 }).sum::<i64>()
 //!         + int as i64 });
-//! collection.register_shared(|| Arc::new(1i8));
-//! collection.register_shared(|| Arc::new(2i8));
-//! collection.register_shared(|| Arc::new(3i8));
-//! collection.register_transient(|| 4i16);
+//! collection.register_arc(|| Arc::new(1i8));
+//! collection.register_arc(|| Arc::new(2i8));
+//! collection.register_arc(|| Arc::new(3i8));
+//! collection.register(|| 4i16);
 //!
 //! let provider = collection.build().expect("All dependencies are resolvable");
 //! assert_eq!(Some(Arc::new(3)), provider.get::<Dynamic<Arc<i8>>>()); // Last registered i8
@@ -109,7 +109,7 @@ impl ServiceCollection {
 
     /// Registers a transient service without dependencies. 
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn() -> T) {
+    pub fn register<T: Any>(&mut self, creator: fn() -> T) {
         let func : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |_: &ServiceProvider| {
             creator()
         });
@@ -118,7 +118,10 @@ impl ServiceCollection {
     }
     /// Registers a shared service without dependencies. 
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register_shared<'s, 'a: 's, T: Any + ?Sized>(&'s mut self, creator: fn() -> Arc<T>) {
+    /// 
+    /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
+    /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent memory leaks. 
+    pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn() -> Arc<T>) {
         let cell = once_cell::sync::OnceCell::new();
        
         let func : Box<dyn Fn(&ServiceProvider) -> Arc<T>> = Box::new(move |_container: &ServiceProvider| { 
@@ -137,6 +140,13 @@ impl ServiceCollection {
         Ok (ServiceProvider { producers: Arc::new(producers), initial_state: Arc::new(()) })
     }
 
+    ///
+    /// Returns a factory which can efficiently create ServiceProviders from 
+    /// ServiceCollections which are missing one dependent service T (e.g. Request, StartupConfiguration)
+    /// The missing service must implement `Any` + `Clone`. 
+    /// 
+    /// Unlike shared services, its reference counter isn't checked to equal zero when the provider is dropped
+    ///
     pub fn build_factory<T: Clone + Any>(self) -> Result<service_provider_factory::ServiceProviderFactory<T>, BuildError> {
         service_provider_factory::ServiceProviderFactory::create(self)
     }
@@ -167,7 +177,7 @@ pub struct MissingDependencyType {
 
 pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
-    pub fn register_transient<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> T) {
+    pub fn register<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
         
         let func : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |container: &ServiceProvider| {
@@ -177,7 +187,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         
         self.0.producers.push(func.into());
     }
-    pub fn register_shared<'s, 'a: 's, T: Any + ?Sized>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
+    pub fn register_arc<'s, 'a: 's, T: Any + ?Sized>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
         let func : Box<dyn Fn(&ServiceProvider) -> Arc<T>> = Box::new(move |container: &ServiceProvider| { 
@@ -192,9 +202,8 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 }
 
 pub struct ServiceProvider {
-    
+    /// Initial state of the provider
     initial_state: Arc<()>,
-    /// Mustn't be changed because `resolve_unchecked` relies on it.
     producers: Arc<Vec<UntypedFn>>
 }
 
@@ -213,10 +222,10 @@ mod tests {
     #[test]
     fn resolve_last_transient() {
         let mut col = ServiceCollection::new();
-        col.register_transient(|| 0);
-        col.register_transient(|| 5);
-        col.register_transient(|| 1);
-        col.register_transient(|| 2);
+        col.register(|| 0);
+        col.register(|| 5);
+        col.register(|| 1);
+        col.register(|| 2);
         let provider = col.build().expect("Expected to have all dependencies");
         let nr = provider.get::<Dynamic::<i32>>().unwrap();
         assert_eq!(2, nr);
@@ -225,8 +234,8 @@ mod tests {
     #[test]
     fn resolve_shared() {
         let mut col = ServiceCollection::new();
-        col.register_shared(|| Arc::new(std::cell::RefCell::new(1)));
-        col.with::<ServiceProvider>().register_shared(|_| Arc::new(std::cell::RefCell::new(2)));
+        col.register_arc(|| Arc::new(std::cell::RefCell::new(1)));
+        col.with::<ServiceProvider>().register_arc(|_| Arc::new(std::cell::RefCell::new(2)));
 
         let prov = col.build().expect("Should have all Dependencies");
         let second = prov.get::<Dynamic<Arc<std::cell::RefCell<i32>>>>().expect("Expecte to get second");
@@ -261,7 +270,7 @@ mod tests {
 
     fn build_with_missing_dependency_fails<T: Resolvable>(missing_msg_parts: &[&str]) {
         fn check(mut col: ServiceCollection, missing_msg_parts: &[&str]) {
-            col.register_transient(|| 1);
+            col.register(|| 1);
             match col.build() {
                 Ok(_) => panic!("Build with missing dependency should fail"),
                 Err(e) => match e {
@@ -275,20 +284,20 @@ mod tests {
             }
         }
         let mut col = ServiceCollection::new();
-        col.with::<T>().register_transient(|_| ());
+        col.with::<T>().register(|_| ());
         check(col, missing_msg_parts);
 
         let mut col = ServiceCollection::new();
-        col.with::<T>().register_shared(|_| Arc::new(()));
+        col.with::<T>().register_arc(|_| Arc::new(()));
         check(col, missing_msg_parts);        
     }
 
     #[test]
     fn resolve_last_shared() {
         let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(0));
-        container.register_shared(|| Arc::new(1));
-        container.register_shared(|| Arc::new(2));
+        container.register_arc(|| Arc::new(0));
+        container.register_arc(|| Arc::new(1));
+        container.register_arc(|| Arc::new(2));
         let provider = container.build().expect("Expected to have all dependencies");
         let nr_ref = provider.get::<Dynamic::<Arc<i32>>>().unwrap();
         assert_eq!(2, *nr_ref);
@@ -297,9 +306,9 @@ mod tests {
     #[test]
     fn resolve_transient_services() {
         let mut container = ServiceCollection::new();
-        container.register_transient(|| 0);
-        container.register_transient(|| 5);
-        container.register_transient(|| 2);
+        container.register(|| 0);
+        container.register(|| 5);
+        container.register(|| 2);
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
@@ -328,9 +337,9 @@ mod tests {
     #[test]
     fn resolve_shared_services() {
         let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(0));
-        container.register_shared(|| Arc::new(5));
-        container.register_shared(|| Arc::new(2));
+        container.register_arc(|| Arc::new(0));
+        container.register_arc(|| Arc::new(5));
+        container.register_arc(|| Arc::new(2));
         let provider = container.build().expect("Expected to have all dependencies");
 
         // Count
@@ -360,8 +369,8 @@ mod tests {
     #[test]
     fn resolve_test() {
         let mut container = ServiceCollection::new();
-        container.register_transient(|| 42);
-        container.register_shared(|| Arc::new(42));
+        container.register(|| 42);
+        container.register_arc(|| Arc::new(42));
         let provider = container.build().expect("Expected to have all dependencies");
         assert_eq!(
             provider.get::<Dynamic::<i32>>().unwrap(), 
@@ -372,7 +381,7 @@ mod tests {
     #[test]
     fn get_registered_dynamic_id() {
         let mut container = ServiceCollection::new();
-        container.register_transient(|| 42);
+        container.register(|| 42);
         assert_eq!(
             Some(42i32), 
             container.build()
@@ -383,7 +392,7 @@ mod tests {
     #[test]
     fn get_registered_dynamic_ref() {
         let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(42));
+        container.register_arc(|| Arc::new(42));
         assert_eq!(
             Some(42i32), 
             container.build()
@@ -395,8 +404,8 @@ mod tests {
     #[test]
     fn tuple_dependency_resolves_to_prechecked_type() {
         let mut container = ServiceCollection::new();
-        container.register_transient(|| 64i64);
-        container.with::<(Dynamic<i64>, Dynamic<i64>)>().register_shared(|(a, b)| {
+        container.register(|| 64i64);
+        container.with::<(Dynamic<i64>, Dynamic<i64>)>().register_arc(|(a, b)| {
             assert_eq!(64, a);
             assert_eq!(64, b);
             Arc::new(42)
@@ -424,8 +433,8 @@ mod tests {
     #[test]
     fn resolve_tuple_2() {
         let mut container = ServiceCollection::new();
-        container.register_transient(|| 32i32);
-        container.register_shared(|| Arc::new(64i64));
+        container.register(|| 32i32);
+        container.register_arc(|| Arc::new(64i64));
         let (a, b) = container.build()
             .expect("Expected to have all dependencies")
             .get::<(Dynamic<i32>, Dynamic<Arc<i64>>)>();
@@ -444,8 +453,8 @@ mod tests {
     #[test]
     fn register_struct_as_dynamic() {
         let mut container = ServiceCollection::new();   
-        container.register_shared(|| Arc::new(42i32));
-        container.with::<Dynamic<Arc<i32>>>().register_shared(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service>);
+        container.register_arc(|| Arc::new(42i32));
+        container.with::<Dynamic<Arc<i32>>>().register_arc(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service>);
         let provider = container.build().expect("Expected to have all dependencies");
         let service = provider.get::<Dynamic<Arc<dyn Service>>>()
             .expect("Expected to get a service");
@@ -467,13 +476,13 @@ mod tests {
     #[test]
     fn drop_shareds_after_provider_drop() {
         let mut col = ServiceCollection::new();
-        col.register_shared(|| Arc::new(Test));
+        col.register_arc(|| Arc::new(Test));
         let prov = col.build().unwrap();
         drop(prov);
         assert_eq!(0, unsafe { DROP_COUNT });
         
         let mut col = ServiceCollection::new();
-        col.register_shared(|| Arc::new(Test));
+        col.register_arc(|| Arc::new(Test));
         let prov = col.build().expect("Expected to have all dependencies");
         prov.get::<Dynamic<Arc<Test>>>().expect("Expected to receive the service");
         drop(prov);

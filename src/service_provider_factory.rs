@@ -7,13 +7,6 @@ use {
     },
     std::sync::Arc
 };
-
-///
-/// Represents a factory which can efficiently create ServiceProviders from 
-/// ServiceCollections which are missing one dependent service T (e.g. Request, StartupConfiguration)
-/// The missing service must implement `Any` + `Clone`. Unlike shared services, its reference counter isn't checked
-/// to equal zero when the provider is dropped
-///
 pub struct ServiceProviderFactory<T: Any + Clone> {
     producers: Arc<Vec<UntypedFn>>,
     remaining: PhantomData<T>
@@ -52,7 +45,7 @@ mod tests {
     #[test]
     fn create_provider_with_factory() {
         let mut collection = ServiceCollection::new();
-        collection.with::<Dynamic<i32>>().register_transient(|s| s as i64);
+        collection.with::<Dynamic<i32>>().register(|s| s as i64);
         let mut factory = collection.build_factory().unwrap();
         let provider = factory.build(42);
         assert_eq!(Some(42i64), provider.get::<Dynamic<i64>>());
@@ -61,7 +54,7 @@ mod tests {
     #[test]
     fn create_provider_with_factory_fails_for_missing_dependency() {
         let mut collection = ServiceCollection::new();
-        collection.with::<Dynamic<i32>>().register_transient(|s| s as i64);
+        collection.with::<Dynamic<i32>>().register(|s| s as i64);
         if let Err(BuildError::MissingDependency(infos)) = collection.build_factory::<u32>() {
             assert_eq!(
                 core::any::TypeId::of::<Dynamic<i32>>(), 
