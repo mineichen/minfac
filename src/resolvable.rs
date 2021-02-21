@@ -157,16 +157,12 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     }
 }
 
-pub trait GenericServices {
-    type Resolvable: resolvable::Resolvable;
-}
-
-impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices {
-    type Item = ServiceIterator<TServices::Resolvable>;
-    type ItemPreChecked = ServiceIterator<TServices::Resolvable>;
+impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
+    type Item = ServiceIterator<Dynamic<T>>;
+    type ItemPreChecked = ServiceIterator<Dynamic<T>>;
 
     fn resolve<'s>(container: &'s ServiceProvider) -> Self::Item {
-        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<TServices::Resolvable>(), |f| &f.result_type_id);
+        let next_pos = binary_search::binary_search_by_first_key(&container.producers, &TypeId::of::<Dynamic<T>>(), |f| &f.result_type_id);
         ServiceIterator { 
             provider: ServiceProvider {
                 initial_state: container.initial_state.clone(),
@@ -180,9 +176,6 @@ impl<TServices: GenericServices + 'static> resolvable::Resolvable for TServices 
     fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> Self::ItemPreChecked {
         Self::resolve(container)
     }
-}
-impl<T: Any> GenericServices for DynamicServices<T> {
-    type Resolvable = Dynamic<T>;
 }
 
 impl<T: Any> resolvable::Resolvable for Dynamic<T> {
