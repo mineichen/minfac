@@ -193,19 +193,15 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
         Self::resolve(container).unwrap()
     }
     fn add_resolvable_checker(col: &mut ServiceCollection) {
-        add_dynamic_checker::<Self>(col)
+        col.dep_checkers.push(Box::new(|producers| { 
+            match producers[..].binary_search_by_key(&TypeId::of::<Self>(), |f| f.result_type_id) {
+                Ok(_) => None,
+                Err(_) => Some(BuildError::MissingDependency(
+                    MissingDependencyType { 
+                        name: std::any::type_name::<Self>(), 
+                        id: std::any::TypeId::of::<Self>()
+                    } ))
+            }
+        }))
     }
-}
-
-fn add_dynamic_checker<T: resolvable::Resolvable>(col: &mut ServiceCollection) {
-    col.dep_checkers.push(Box::new(|producers| { 
-        match producers[..].binary_search_by_key(&TypeId::of::<T>(), |f| f.result_type_id) {
-            Ok(_) => None,
-            Err(_) => Some(BuildError::MissingDependency(
-                MissingDependencyType { 
-                    name: std::any::type_name::<T>(), 
-                    id: std::any::TypeId::of::<T>()
-                } ))
-        }
-    }));
 }

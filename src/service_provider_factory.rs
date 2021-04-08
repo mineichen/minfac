@@ -46,9 +46,9 @@ mod tests {
     fn create_provider_with_factory() {
         let mut collection = ServiceCollection::new();
         collection.with::<Dynamic<i32>>().register(|s| s as i64);
-        let mut factory = collection.build_factory().unwrap();
-        let provider = factory.build(42);
-        assert_eq!(Some(42i64), provider.get::<Dynamic<i64>>());
+        let provider = collection.build_factory()
+            .map(|mut factory| factory.build(42).get::<Dynamic<i64>>());
+        assert_eq!(Ok(Some(42i64)), provider);
     }
 
     #[test]
@@ -56,10 +56,11 @@ mod tests {
         let mut collection = ServiceCollection::new();
         collection.with::<Dynamic<i32>>().register(|s| s as i64);
         if let Err(BuildError::MissingDependency(infos)) = collection.build_factory::<u32>() {
-            assert_eq!(
-                core::any::TypeId::of::<Dynamic<i32>>(), 
-                infos.id
-            );
+            
+            assert_eq!(infos, crate::MissingDependencyType { 
+                id: core::any::TypeId::of::<Dynamic<i32>>(),
+                name: "ioc_rs::Dynamic<i32>"
+            });
         } else {
             panic!("Expected to have missing dependency error");
         }

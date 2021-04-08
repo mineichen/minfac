@@ -66,7 +66,6 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
     producers: Vec<UntypedFn>,
-    // producers2: Vec<(TypeId, *const dyn Producer<Result=()>)>,
     dep_checkers: Vec<Box<dyn Fn(&Vec<UntypedFn>) -> Option<BuildError>>>
 }
 
