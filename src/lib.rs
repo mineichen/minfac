@@ -85,7 +85,7 @@ impl<T: Any> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn where T: Any
 
 impl Drop for UntypedFn {
     fn drop(&mut self) {
-        unsafe { core::ptr::drop_in_place(self.pointer as *mut dyn Fn()) };
+        drop(unsafe { Box::from_raw(self.pointer as *mut dyn Fn(&ServiceProvider)) });
     }
 }
 
