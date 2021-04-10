@@ -39,6 +39,7 @@ use {
         any::{Any, TypeId},
         marker::PhantomData,
     },
+    once_cell::sync::OnceCell,
     resolvable::Resolvable,
     std::sync::Arc,
 };
@@ -49,6 +50,7 @@ mod service_provider_factory;
 
 /// Represents instances of a type `T` within a `ServiceProvider`
 pub struct ServiceIterator<T> {
+    ///
     next_pos: Option<usize>,
     provider: ServiceProvider,
     item_type: PhantomData<T>,
@@ -63,9 +65,11 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
-    producers: Vec<UntypedFn>,
+    producers: Vec<UntypedFnFactory>,
     dep_checkers: Vec<Box<dyn Fn(&Vec<UntypedFn>) -> Option<BuildError>>>,
 }
+
+type UntypedFnFactory = Box<dyn Fn(&mut usize) -> UntypedFn>;
 
 struct UntypedFn {
     result_type_id: TypeId,
@@ -90,12 +94,34 @@ impl Drop for UntypedFn {
     }
 }
 
+#[derive(Clone)]
+struct UntypedPointer {
+    pointer: usize,
+    destroyer: fn(usize),
+}
+
+impl Default for UntypedPointer {
+    fn default() -> Self {
+        Self {
+            pointer: 0,
+            destroyer: |_| {},
+        }
+    }
+}
+
+impl Drop for UntypedPointer {
+    fn drop(&mut self) {
+        if self.pointer != 0 {
+            (self.destroyer)(self.pointer)
+        }
+    }
+}
+
 impl ServiceCollection {
     /// Creates an empty ServiceCollection
     pub fn new() -> Self {
         Self {
             producers: Vec::new(),
-            // producers2: Vec::new(),
             dep_checkers: Vec::new(),
         }
     }
@@ -110,10 +136,12 @@ impl ServiceCollection {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Any>(&mut self, creator: fn() -> T) {
-        let func: Box<dyn Fn(&ServiceProvider) -> T> =
-            Box::new(move |_: &ServiceProvider| creator());
-
-        self.producers.push(func.into());
+        let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
+            let func: Box<dyn Fn(&ServiceProvider) -> T> =
+                Box::new(move |_: &ServiceProvider| creator());
+            func.into()
+        });
+        self.producers.push(factory);
     }
     /// Registers a shared service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
@@ -121,31 +149,47 @@ impl ServiceCollection {
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent memory leaks.
     pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn() -> Arc<T>) {
-        let cell = once_cell::sync::OnceCell::new();
+        let factory: UntypedFnFactory = Box::new(move |service_state_counter| {
+            let service_state_idx: usize = *service_state_counter;
+            *service_state_counter += 1;
 
-        let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
-            Box::new(move |_container: &ServiceProvider| cell.get_or_init(|| creator()).clone());
+            let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
+                Box::new(move |provider: &ServiceProvider| {
+                    let cell = provider
+                        .service_states
+                        .get(service_state_idx)
+                        .unwrap()
+                        .get_or_init(|| UntypedPointer {
+                            pointer: Box::into_raw(Box::new(creator())) as usize,
+                            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
+                        });
 
-        self.producers.push(func.into());
+                    unsafe { &*(cell.pointer as *mut Arc<T>) }.clone()
+                });
+            func.into()
+        });
+        self.producers.push(factory);
     }
 
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
-        let producers = self.validate_producers()?;
+        let (producers, service_states_count) = self.validate_producers()?;
+        let service_states = vec![OnceCell::new(); service_states_count];
         Ok(ServiceProvider {
             producers: Arc::new(producers),
+            service_states: Arc::new(service_states),
             initial_state: None,
-            initial_state_destroyer: |_| { unreachable!() }
+            initial_state_destroyer: |_| unreachable!(),
         })
     }
 
     ///
     /// Returns a factory which can efficiently create ServiceProviders from
-    /// ServiceCollections which are missing one dependent service T (e.g. Request, StartupConfiguration)
+    /// ServiceCollections which are missing one dependent service T (e.g. HttpRequest, StartupConfiguration)
     /// The missing service must implement `Any` + `Clone`.
     ///
-    /// Unlike shared services, its reference counter isn't checked to equal zero when the provider is dropped
+    /// Unlike shared services, this service's reference counter isn't checked to equal zero when the provider is dropped
     ///
     pub fn build_factory<T: Clone + Any>(
         self,
@@ -153,19 +197,24 @@ impl ServiceCollection {
         service_provider_factory::ServiceProviderFactory::create(self)
     }
 
-    fn validate_producers(mut self) -> Result<Vec<UntypedFn>, BuildError> {
-        self.producers.sort_by_key(|a| a.result_type_id);
-        let mut producers = Vec::new();
-        core::mem::swap(&mut self.producers, &mut producers);
+    fn validate_producers(self) -> Result<(Vec<UntypedFn>, usize), BuildError> {
+        let mut service_state_couter = 0;
+        let mut created: Vec<UntypedFn> = self
+            .producers
+            .into_iter()
+            .map(|x| (x)(&mut service_state_couter))
+            .collect();
+
+        created.sort_by_key(|a| a.result_type_id);
         if let Some(err) = self
             .dep_checkers
             .iter()
-            .filter_map(|checker| (checker)(&mut producers))
+            .filter_map(|checker| (checker)(&mut created))
             .next()
         {
             return Err(err);
         }
-        Ok(producers)
+        Ok((created, service_state_couter))
     }
 }
 
@@ -187,37 +236,53 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
     pub fn register<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
 
-        let func: Box<dyn Fn(&ServiceProvider) -> T> =
-            Box::new(move |container: &ServiceProvider| {
-                let arg = TDep::resolve_prechecked(container);
-                creator(arg)
-            });
-
-        self.0.producers.push(func.into());
+        let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
+            let func: Box<dyn Fn(&ServiceProvider) -> T> =
+                Box::new(move |container: &ServiceProvider| {
+                    let arg = TDep::resolve_prechecked(container);
+                    creator(arg)
+                });
+            func.into()
+        });
+        self.0.producers.push(factory);
     }
     pub fn register_arc<'s, 'a: 's, T: Any + ?Sized>(
         &'s mut self,
         creator: fn(TDep::ItemPreChecked) -> Arc<T>,
     ) {
-        let cell = once_cell::sync::OnceCell::new();
         TDep::add_resolvable_checker(&mut self.0);
-        let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
-            Box::new(move |container: &ServiceProvider| {
-                cell.get_or_init(|| {
-                    let arg = TDep::resolve_prechecked(container);
-                    creator(arg)
-                })
-                .clone()
-            });
 
-        self.0.producers.push(func.into());
+        let factory: UntypedFnFactory = Box::new(move |service_state_counter| {
+            let service_state_idx: usize = *service_state_counter;
+            *service_state_counter += 1;
+
+            let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
+                Box::new(move |provider: &ServiceProvider| {
+                    let cell = provider
+                        .service_states
+                        .get(service_state_idx)
+                        .unwrap()
+                        .get_or_init(|| {
+                            let arg = TDep::resolve_prechecked(provider);
+                            UntypedPointer {
+                                pointer: Box::into_raw(Box::new(creator(arg))) as usize,
+                                destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
+                            }
+                        });
+
+                    unsafe { &*(cell.pointer as *mut Arc<T>) }.clone()
+                });
+            func.into()
+        });
+        self.0.producers.push(factory);
     }
 }
 
 pub struct ServiceProvider {
     initial_state: Option<Arc<()>>,
     producers: Arc<Vec<UntypedFn>>,
-    initial_state_destroyer: fn(Arc<()>)
+    service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
+    initial_state_destroyer: fn(Arc<()>),
 }
 
 impl ServiceProvider {
@@ -231,7 +296,8 @@ impl Clone for ServiceProvider {
         Self {
             initial_state: self.initial_state.clone(),
             producers: self.producers.clone(),
-            initial_state_destroyer: self.initial_state_destroyer
+            service_states: self.service_states.clone(),
+            initial_state_destroyer: self.initial_state_destroyer,
         }
     }
 }
