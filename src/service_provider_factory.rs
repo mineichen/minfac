@@ -1,6 +1,6 @@
 use {
     crate::{ServiceCollection, ServiceProvider, UntypedFn, UntypedPointer},
-    core::{any::{Any}, clone::Clone, marker::PhantomData},
+    core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
     std::sync::Arc,
 };
@@ -15,7 +15,6 @@ pub struct ServiceProviderFactory<T: Any + Clone> {
 
 impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn create(mut collection: ServiceCollection) -> Result<Self, super::BuildError> {
-        
         let factory: crate::UntypedFnFactory = Box::new(move |service_state_counter| {
             let service_state_idx: usize = *service_state_counter;
             *service_state_counter += 1;
@@ -25,8 +24,8 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
             });
             creator.into()
         });
-        
-        collection.producers.push(factory);
+
+        collection.producer_factories.push(factory);
         let (producers, service_states_count) = collection.validate_producers()?;
 
         Ok(ServiceProviderFactory {
@@ -38,11 +37,12 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
 
     pub fn build(&mut self, remaining: T) -> ServiceProvider {
         let service_states = vec![OnceCell::new(); self.service_states_count];
-        
-        service_states.last()
+
+        service_states
+            .last()
             .unwrap()
-            .get_or_init(|| { UntypedPointer::new(move || remaining) });
- 
+            .get_or_init(|| UntypedPointer::new(remaining));
+
         ServiceProvider {
             service_states: Arc::new(service_states),
             producers: self.producers.clone(),

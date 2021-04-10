@@ -65,7 +65,7 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
-    producers: Vec<UntypedFnFactory>,
+    producer_factories: Vec<UntypedFnFactory>,
     dep_checkers: DependencyChecker,
 }
 
@@ -102,14 +102,13 @@ struct UntypedPointer {
 }
 
 impl UntypedPointer {
-    pub fn new<T, TFn: FnOnce() -> T>(initializer: TFn) -> Self {
+    pub fn new<T>(data: T) -> Self {
         Self {
-            pointer: Box::into_raw(Box::new((initializer)())) as usize,
+            pointer: Box::into_raw(Box::new(data)) as usize,
             destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
         }
     }
 }
-
 
 impl Default for UntypedPointer {
     fn default() -> Self {
@@ -132,7 +131,7 @@ impl ServiceCollection {
     /// Creates an empty ServiceCollection
     pub fn new() -> Self {
         Self {
-            producers: Vec::new(),
+            producer_factories: Vec::new(),
             dep_checkers: Vec::new(),
         }
     }
@@ -158,7 +157,7 @@ impl ServiceCollection {
                 Box::new(move |_: &ServiceProvider| creator());
             func.into()
         });
-        self.producers.push(factory);
+        self.producer_factories.push(factory);
     }
     /// Registers a shared service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
@@ -176,7 +175,7 @@ impl ServiceCollection {
                 });
             func.into()
         });
-        self.producers.push(factory);
+        self.producer_factories.push(factory);
     }
 
     /// Checks, if all dependencies of registered services are available.
@@ -186,7 +185,7 @@ impl ServiceCollection {
         let service_states = vec![OnceCell::new(); service_states_count];
         Ok(ServiceProvider {
             producers: Arc::new(producers),
-            service_states: Arc::new(service_states)
+            service_states: Arc::new(service_states),
         })
     }
 
@@ -206,7 +205,7 @@ impl ServiceCollection {
     fn validate_producers(self) -> Result<(Vec<UntypedFn>, usize), BuildError> {
         let mut service_state_couter = 0;
         let mut created: Vec<UntypedFn> = self
-            .producers
+            .producer_factories
             .into_iter()
             .map(|x| (x)(&mut service_state_couter))
             .collect();
@@ -250,7 +249,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
                 });
             func.into()
         });
-        self.0.producers.push(factory);
+        self.0.producer_factories.push(factory);
     }
     pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         TDep::add_resolvable_checker(&mut self.0);
@@ -267,13 +266,13 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
                 });
             func.into()
         });
-        self.0.producers.push(factory);
+        self.0.producer_factories.push(factory);
     }
 }
 
 pub struct ServiceProvider {
     producers: Arc<Vec<UntypedFn>>,
-    service_states: Arc<Vec<OnceCell<UntypedPointer>>>
+    service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
 }
 
 impl ServiceProvider {
@@ -285,7 +284,7 @@ impl ServiceProvider {
             .service_states
             .get(index)
             .unwrap()
-            .get_or_init(|| UntypedPointer::new(initializer));
+            .get_or_init(|| UntypedPointer::new(initializer()));
 
         unsafe { &*(cell.pointer as *mut T) }.clone()
     }
