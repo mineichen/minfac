@@ -74,7 +74,7 @@ type DependencyChecker = Vec<fn(&Vec<UntypedFn>) -> Option<BuildError>>;
 
 struct UntypedFn {
     result_type_id: TypeId,
-    pointer: *const dyn Fn(),
+    pointer: *mut dyn Fn(),
 }
 
 impl<T: Any> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn
@@ -84,7 +84,7 @@ where
     fn from(factory: Box<dyn Fn(&ServiceProvider) -> T>) -> Self {
         UntypedFn {
             result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
-            pointer: Box::into_raw(factory) as *const dyn Fn(),
+            pointer: Box::into_raw(factory) as *mut dyn Fn(),
         }
     }
 }
@@ -100,6 +100,16 @@ struct UntypedPointer {
     pointer: usize,
     destroyer: fn(usize),
 }
+
+impl UntypedPointer {
+    pub fn new<T, TFn: FnOnce() -> T>(initializer: TFn) -> Self {
+        Self {
+            pointer: Box::into_raw(Box::new((initializer)())) as usize,
+            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
+        }
+    }
+}
+
 
 impl Default for UntypedPointer {
     fn default() -> Self {
@@ -162,16 +172,7 @@ impl ServiceCollection {
 
             let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
                 Box::new(move |provider: &ServiceProvider| {
-                    let cell = provider
-                        .service_states
-                        .get(service_state_idx)
-                        .unwrap()
-                        .get_or_init(|| UntypedPointer {
-                            pointer: Box::into_raw(Box::new(creator())) as usize,
-                            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
-                        });
-
-                    unsafe { &*(cell.pointer as *mut Arc<T>) }.clone()
+                    provider.get_or_initialize_pos(service_state_idx, creator)
                 });
             func.into()
         });
@@ -185,9 +186,7 @@ impl ServiceCollection {
         let service_states = vec![OnceCell::new(); service_states_count];
         Ok(ServiceProvider {
             producers: Arc::new(producers),
-            service_states: Arc::new(service_states),
-            initial_state: None,
-            initial_state_destroyer: |_| unreachable!(),
+            service_states: Arc::new(service_states)
         })
     }
 
@@ -262,19 +261,9 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 
             let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
                 Box::new(move |provider: &ServiceProvider| {
-                    let cell = provider
-                        .service_states
-                        .get(service_state_idx)
-                        .unwrap()
-                        .get_or_init(|| {
-                            let arg = TDep::resolve_prechecked(provider);
-                            UntypedPointer {
-                                pointer: Box::into_raw(Box::new(creator(arg))) as usize,
-                                destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
-                            }
-                        });
-
-                    unsafe { &*(cell.pointer as *mut Arc<T>) }.clone()
+                    provider.get_or_initialize_pos(service_state_idx, move || {
+                        creator(TDep::resolve_prechecked(provider))
+                    })
                 });
             func.into()
         });
@@ -283,33 +272,30 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 }
 
 pub struct ServiceProvider {
-    initial_state: Option<Arc<()>>,
     producers: Arc<Vec<UntypedFn>>,
-    service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
-    initial_state_destroyer: fn(Arc<()>),
+    service_states: Arc<Vec<OnceCell<UntypedPointer>>>
 }
 
 impl ServiceProvider {
     pub fn get<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
     }
+    fn get_or_initialize_pos<T: Clone, TFn: Fn() -> T>(&self, index: usize, initializer: TFn) -> T {
+        let cell = self
+            .service_states
+            .get(index)
+            .unwrap()
+            .get_or_init(|| UntypedPointer::new(initializer));
+
+        unsafe { &*(cell.pointer as *mut T) }.clone()
+    }
 }
 
 impl Clone for ServiceProvider {
     fn clone(&self) -> Self {
         Self {
-            initial_state: self.initial_state.clone(),
             producers: self.producers.clone(),
             service_states: self.service_states.clone(),
-            initial_state_destroyer: self.initial_state_destroyer,
-        }
-    }
-}
-
-impl Drop for ServiceProvider {
-    fn drop(&mut self) {
-        if let Some(x) = self.initial_state.take() {
-            (self.initial_state_destroyer)(x)
         }
     }
 }

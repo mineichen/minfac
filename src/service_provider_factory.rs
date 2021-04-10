@@ -1,6 +1,6 @@
 use {
-    crate::{ServiceCollection, ServiceProvider, UntypedFn},
-    core::{any::Any, clone::Clone, marker::PhantomData},
+    crate::{ServiceCollection, ServiceProvider, UntypedFn, UntypedPointer},
+    core::{any::{Any}, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
     std::sync::Arc,
 };
@@ -8,38 +8,43 @@ use {
 /// Does all checks to build a ServiceProvider on premise that an instance of T will be available.
 /// Therefore multiple ServiceProvider with different scoped information like HttpRequest can be created very efficiently
 pub struct ServiceProviderFactory<T: Any + Clone> {
-    required_service_states: usize,
+    service_states_count: usize,
     producers: Arc<Vec<UntypedFn>>,
     anticipated: PhantomData<T>,
 }
 
 impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn create(mut collection: ServiceCollection) -> Result<Self, super::BuildError> {
-        let factory: crate::UntypedFnFactory = Box::new(move |&mut _service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(|provider| {                
-                let pointer: &Arc<T> = unsafe { &*(&provider.initial_state as *const Option<Arc<()>> as *const Arc<T>) };
-                T::clone(pointer)
+        
+        let factory: crate::UntypedFnFactory = Box::new(move |service_state_counter| {
+            let service_state_idx: usize = *service_state_counter;
+            *service_state_counter += 1;
+
+            let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |provider| {
+                provider.get_or_initialize_pos(service_state_idx, || unreachable!())
             });
             creator.into()
         });
+        
         collection.producers.push(factory);
-        let (producers, required_service_states) = collection.validate_producers()?;
+        let (producers, service_states_count) = collection.validate_producers()?;
 
         Ok(ServiceProviderFactory {
-            required_service_states,
+            service_states_count,
             producers: Arc::new(producers),
             anticipated: PhantomData,
         })
     }
 
     pub fn build(&mut self, remaining: T) -> ServiceProvider {
-        let service_states = vec![OnceCell::new(); self.required_service_states];
+        let service_states = vec![OnceCell::new(); self.service_states_count];
+        
+        service_states.last()
+            .unwrap()
+            .get_or_init(|| { UntypedPointer::new(move || remaining) });
+ 
         ServiceProvider {
             service_states: Arc::new(service_states),
-            initial_state_destroyer: |state| unsafe {
-                drop(core::mem::transmute::<_, Arc<T>>(state))
-            },
-            initial_state: unsafe { core::mem::transmute(Arc::new(remaining)) },
             producers: self.producers.clone(),
         }
     }
@@ -76,11 +81,11 @@ mod tests {
         collection.register_arc(|| Arc::new(RefCell::new(1)));
 
         let result = collection.build_factory().map(|mut factory| {
-            let first = factory
-                .build(())
-                .get::<Dynamic<Arc<RefCell<i32>>>>()
-                .unwrap();
+            let first_factory = factory.build(());
+            let first = first_factory.get::<Dynamic<Arc<RefCell<i32>>>>().unwrap();
             assert_eq!(1, first.replace(2));
+
+            let first = first_factory.get::<Dynamic<Arc<RefCell<i32>>>>().unwrap();
 
             let second = factory
                 .build(())

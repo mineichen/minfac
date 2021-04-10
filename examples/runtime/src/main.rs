@@ -1,10 +1,18 @@
 use {std::sync::Arc, ioc_rs::Dynamic};
 
+///
+/// # Expected output
+///
+/// plugin: Register Service
+/// plugin: I duplicate 2
+/// Runtime: service.call(2) = 4
+/// Runtime: Get 42 multiplied by 3: 126
+///
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Lib must be outside of unsafe block, because it's dropped otherwise resulting in a segfault
     let lib = libloading::Library::new("target/debug/libplugin.dylib")?;
     let mut container = ioc_rs::ServiceCollection::new();
-    container.register(|| 42i32);
+    container.register(|| 42);
     unsafe {
         let func: libloading::Symbol<unsafe extern fn(&mut ioc_rs::ServiceCollection)> = lib.get(b"register")?;
         func(&mut container);

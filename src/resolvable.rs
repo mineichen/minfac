@@ -159,7 +159,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     {
         self.next_pos.map(|i| {
             // If has_next, last must exist
-            let pos = binary_search::binary_search_by_last_key(
+            let pos = binary_search::binary_search_last_by_key(
                 &self.provider.producers[i..],
                 &TypeId::of::<T>(),
                 |f| &f.result_type_id,
@@ -174,7 +174,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     {
         self.next_pos
             .map(|i| {
-                let pos = binary_search::binary_search_by_last_key(
+                let pos = binary_search::binary_search_last_by_key(
                     &self.provider.producers[i..],
                     &TypeId::of::<T>(),
                     |f| &f.result_type_id,
@@ -213,7 +213,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type ItemPreChecked = T;
 
     fn resolve(container: &ServiceProvider) -> Self::Item {
-        binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |f| {
+        binary_search::binary_search_last_by_key(&container.producers, &TypeId::of::<Self>(), |f| {
             &f.result_type_id
         })
         .map(|f| unsafe { resolve_unchecked::<Self>(container, f) })

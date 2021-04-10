@@ -3,11 +3,7 @@
 /// This function is optimized for searching input with multiple occurences of needle
 /// https://www.geeksforgeeks.org/find-first-and-last-positions-of-an-element-in-a-sorted-array/
 ///
-pub fn binary_search_by_first_key<T, U, TFn>(
-    input: &[T],
-    needle: &U,
-    find: TFn,
-) -> Option<usize>
+pub fn binary_search_by_first_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
     U: std::cmp::Ord,
     TFn: Fn(&T) -> &U,
@@ -35,11 +31,7 @@ where
 /// This function is optimized for searching input with one or just a few occurences of needle
 /// O(log(n)) worst case
 /// slice::binary_search_by_key() seems to return the last entry as well, but docs state that we cant rely on that
-pub fn binary_search_by_last_key<T, U, TFn>(
-    input: &[T],
-    needle: &U,
-    find: TFn,
-) -> Option<usize>
+pub fn binary_search_last_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
     U: std::cmp::Ord,
     TFn: Fn(&T) -> &U,
@@ -80,10 +72,10 @@ mod tests {
 
     #[test]
     fn test_binary_search_by_last_key() {
-        test_first_or_last(|i, e| binary_search_by_last_key(i, e, |extr| extr));
-        assert_eq!(Some(2), binary_search_by_last_key(&[0, 0, 0], &0, |a| a));
-        assert_eq!(Some(2), binary_search_by_last_key(&[0, 1, 1], &1, |a| a));
-        assert_eq!(Some(1), binary_search_by_last_key(&[0, 0, 1], &0, |a| a));
+        test_first_or_last(|i, e| binary_search_last_by_key(i, e, |extr| extr));
+        assert_eq!(Some(2), binary_search_last_by_key(&[0, 0, 0], &0, |a| a));
+        assert_eq!(Some(2), binary_search_last_by_key(&[0, 1, 1], &1, |a| a));
+        assert_eq!(Some(1), binary_search_last_by_key(&[0, 0, 1], &0, |a| a));
     }
     fn test_first_or_last<'a>(i: impl Fn(&[usize], &usize) -> Option<usize>) {
         assert_eq!(Some(0), (i)(&[0, 1, 2], &0));
