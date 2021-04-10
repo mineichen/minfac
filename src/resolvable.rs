@@ -128,9 +128,8 @@ unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(
 ) -> T::ItemPreChecked {
     ({
         let entry = provider.producers.get_unchecked(pos);
-        debug_assert_eq!(entry.result_type_id, TypeId::of::<T>());
-        let func_ptr = entry.pointer as *const dyn Fn(&'a ServiceProvider) -> T::ItemPreChecked;
-        &*func_ptr
+        debug_assert_eq!(entry.get_result_type_id(), &TypeId::of::<T>());
+        entry.borrow_for::<T::ItemPreChecked>()
     })(&provider)
 }
 
@@ -140,7 +139,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.next_pos.map(|i| {
             self.next_pos = if let Some(next) = self.provider.producers.get(i + 1) {
-                if next.result_type_id == TypeId::of::<T>() {
+                if next.get_result_type_id() == &TypeId::of::<T>() {
                     Some(i + 1)
                 } else {
                     None
@@ -162,7 +161,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
             let pos = binary_search::binary_search_last_by_key(
                 &self.provider.producers[i..],
                 &TypeId::of::<T>(),
-                |f| &f.result_type_id,
+                |f| &f.get_result_type_id(),
             )
             .unwrap();
             unsafe { resolve_unchecked::<T>(&self.provider, i + pos) }
@@ -177,7 +176,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
                 let pos = binary_search::binary_search_last_by_key(
                     &self.provider.producers[i..],
                     &TypeId::of::<T>(),
-                    |f| &f.result_type_id,
+                    |f| &f.get_result_type_id(),
                 )
                 .unwrap();
                 pos + 1
@@ -194,7 +193,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
         let next_pos = binary_search::binary_search_by_first_key(
             &provider.producers,
             &TypeId::of::<Dynamic<T>>(),
-            |f| &f.result_type_id,
+            |f| &f.get_result_type_id(),
         );
         ServiceIterator {
             provider: provider.clone(),
@@ -214,7 +213,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
 
     fn resolve(container: &ServiceProvider) -> Self::Item {
         binary_search::binary_search_last_by_key(&container.producers, &TypeId::of::<Self>(), |f| {
-            &f.result_type_id
+            &f.get_result_type_id()
         })
         .map(|f| unsafe { resolve_unchecked::<Self>(container, f) })
     }
@@ -224,7 +223,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     }
     fn add_resolvable_checker(col: &mut ServiceCollection) {
         col.dep_checkers.push(|producers| {
-            match producers[..].binary_search_by_key(&TypeId::of::<Self>(), |f| f.result_type_id) {
+            match producers[..].binary_search_by_key(&TypeId::of::<Self>(), |f| *f.get_result_type_id()) {
                 Ok(_) => None,
                 Err(_) => Some(BuildError::MissingDependency(MissingDependencyType {
                     name: std::any::type_name::<Self>(),

@@ -41,12 +41,14 @@ use {
     },
     once_cell::sync::OnceCell,
     resolvable::Resolvable,
+    untyped::{UntypedFn, UntypedFnFactory, UntypedPointer},
     std::sync::Arc,
 };
 
 mod binary_search;
 mod resolvable;
 mod service_provider_factory;
+mod untyped;
 
 /// Represents instances of a type `T` within a `ServiceProvider`
 pub struct ServiceIterator<T> {
@@ -69,63 +71,8 @@ pub struct ServiceCollection {
     dep_checkers: DependencyChecker,
 }
 
-type UntypedFnFactory = Box<dyn Fn(&mut usize) -> UntypedFn>;
 type DependencyChecker = Vec<fn(&Vec<UntypedFn>) -> Option<BuildError>>;
 
-struct UntypedFn {
-    result_type_id: TypeId,
-    pointer: *mut dyn Fn(),
-}
-
-impl<T: Any> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn
-where
-    T: Any,
-{
-    fn from(factory: Box<dyn Fn(&ServiceProvider) -> T>) -> Self {
-        UntypedFn {
-            result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
-            pointer: Box::into_raw(factory) as *mut dyn Fn(),
-        }
-    }
-}
-
-impl Drop for UntypedFn {
-    fn drop(&mut self) {
-        drop(unsafe { Box::from_raw(self.pointer as *mut dyn Fn(&ServiceProvider)) });
-    }
-}
-
-#[derive(Clone)]
-struct UntypedPointer {
-    pointer: usize,
-    destroyer: fn(usize),
-}
-
-impl UntypedPointer {
-    pub fn new<T>(data: T) -> Self {
-        Self {
-            pointer: Box::into_raw(Box::new(data)) as usize,
-            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
-        }
-    }
-}
-
-impl Default for UntypedPointer {
-    fn default() -> Self {
-        Self {
-            pointer: 0,
-            destroyer: |_| {},
-        }
-    }
-}
-
-impl Drop for UntypedPointer {
-    fn drop(&mut self) {
-        if self.pointer != 0 {
-            (self.destroyer)(self.pointer)
-        }
-    }
-}
 
 impl ServiceCollection {
     /// Creates an empty ServiceCollection
@@ -210,7 +157,7 @@ impl ServiceCollection {
             .map(|x| (x)(&mut service_state_couter))
             .collect();
 
-        created.sort_by_key(|a| a.result_type_id);
+        created.sort_by_key(|a| *a.get_result_type_id());
         if let Some(err) = self
             .dep_checkers
             .iter()
@@ -280,13 +227,13 @@ impl ServiceProvider {
         T::resolve(self)
     }
     fn get_or_initialize_pos<T: Clone, TFn: Fn() -> T>(&self, index: usize, initializer: TFn) -> T {
-        let cell = self
+        let pointer = self
             .service_states
             .get(index)
             .unwrap()
             .get_or_init(|| UntypedPointer::new(initializer()));
 
-        unsafe { &*(cell.pointer as *mut T) }.clone()
+        unsafe { pointer.borrow_as::<T>() }.clone()
     }
 }
 

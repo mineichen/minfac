@@ -1,5 +1,8 @@
 use {
-    crate::{ServiceCollection, ServiceProvider, UntypedFn, UntypedPointer},
+    crate::{
+        ServiceCollection, 
+        ServiceProvider,
+        untyped::{UntypedFn, UntypedPointer}},
     core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
     std::sync::Arc,

@@ -12,5 +12,7 @@ impl interface::Service for PluginService {
 pub fn register(container: &mut ioc_rs::ServiceCollection) {
     println!("plugin: Register Service");
     container.register_arc(|| Arc::new(PluginService) as Arc<dyn interface::Service>);
-    container.with::<ioc_rs::Dynamic<i32>>().register(|i| i as i64 * 3);
+    container
+        .with::<ioc_rs::Dynamic<i32>>()
+        .register(|i| i as i64 * 3);
 }
