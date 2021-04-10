@@ -3,8 +3,8 @@
 /// This function is optimized for searching input with multiple occurences of needle
 /// https://www.geeksforgeeks.org/find-first-and-last-positions-of-an-element-in-a-sorted-array/
 ///
-pub fn binary_search_by_first_key<'a, T, U, TFn>(
-    input: &'a [T],
+pub fn binary_search_by_first_key<T, U, TFn>(
+    input: &[T],
     needle: &U,
     find: TFn,
 ) -> Option<usize>
@@ -35,8 +35,8 @@ where
 /// This function is optimized for searching input with one or just a few occurences of needle
 /// O(log(n)) worst case
 /// slice::binary_search_by_key() seems to return the last entry as well, but docs state that we cant rely on that
-pub fn binary_search_by_last_key<'a, T, U, TFn>(
-    input: &'a [T],
+pub fn binary_search_by_last_key<T, U, TFn>(
+    input: &[T],
     needle: &U,
     find: TFn,
 ) -> Option<usize>

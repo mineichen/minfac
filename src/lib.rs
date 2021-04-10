@@ -66,10 +66,11 @@ pub struct DynamicServices<T: Any>(PhantomData<T>);
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
     producers: Vec<UntypedFnFactory>,
-    dep_checkers: Vec<Box<dyn Fn(&Vec<UntypedFn>) -> Option<BuildError>>>,
+    dep_checkers: DependencyChecker,
 }
 
 type UntypedFnFactory = Box<dyn Fn(&mut usize) -> UntypedFn>;
+type DependencyChecker = Vec<fn(&Vec<UntypedFn>) -> Option<BuildError>>;
 
 struct UntypedFn {
     result_type_id: TypeId,
@@ -124,6 +125,12 @@ impl ServiceCollection {
             producers: Vec::new(),
             dep_checkers: Vec::new(),
         }
+    }
+}
+
+impl Default for ServiceCollection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -233,7 +240,7 @@ pub struct MissingDependencyType {
 
 pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
-    pub fn register<'s, 'a: 's, T: Any>(&'s mut self, creator: fn(TDep::ItemPreChecked) -> T) {
+    pub fn register<T: Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         TDep::add_resolvable_checker(&mut self.0);
 
         let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
@@ -246,10 +253,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         });
         self.0.producers.push(factory);
     }
-    pub fn register_arc<'s, 'a: 's, T: Any + ?Sized>(
-        &'s mut self,
-        creator: fn(TDep::ItemPreChecked) -> Arc<T>,
-    ) {
+    pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         TDep::add_resolvable_checker(&mut self.0);
 
         let factory: UntypedFnFactory = Box::new(move |service_state_counter| {
@@ -286,7 +290,7 @@ pub struct ServiceProvider {
 }
 
 impl ServiceProvider {
-    pub fn get<'s, T: Resolvable>(&'s self) -> T::Item {
+    pub fn get<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
     }
 }

@@ -16,8 +16,8 @@ pub struct ServiceProviderFactory<T: Any + Clone> {
 impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn create(mut collection: ServiceCollection) -> Result<Self, super::BuildError> {
         let factory: crate::UntypedFnFactory = Box::new(move |&mut _service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(|provider| {
-                let pointer: &Arc<T> = unsafe { core::mem::transmute(&provider.initial_state) };
+            let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(|provider| {                
+                let pointer: &Arc<T> = unsafe { &*(&provider.initial_state as *const Option<Arc<()>> as *const Arc<T>) };
                 T::clone(pointer)
             });
             creator.into()

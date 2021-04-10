@@ -13,10 +13,10 @@ pub trait Resolvable: Any {
 
     /// Resolves a type with the specified provider. There might be multiple calls to this method with
     /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item;
+    fn resolve(provider: &ServiceProvider) -> Self::Item;
 
     /// Called internally when resolving dependencies.
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked;
+    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked;
 
     fn add_resolvable_checker(_: &mut ServiceCollection) {}
 }
@@ -25,23 +25,19 @@ impl Resolvable for () {
     type Item = ();
     type ItemPreChecked = ();
 
-    fn resolve<'s>(_: &'s ServiceProvider) -> Self::Item {
-        ()
-    }
-    fn resolve_prechecked<'s>(_: &'s ServiceProvider) -> Self::ItemPreChecked {
-        ()
-    }
+    fn resolve(_: &ServiceProvider) -> Self::Item {}
+    fn resolve_prechecked(_: &ServiceProvider) -> Self::ItemPreChecked {}
 }
 
 impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
 
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item {
+    fn resolve(provider: &ServiceProvider) -> Self::Item {
         (provider.get::<T0>(), provider.get::<T1>())
     }
 
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
         (
             T0::resolve_prechecked(provider),
             T1::resolve_prechecked(provider),
@@ -58,14 +54,14 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
 
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item {
+    fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
             provider.get::<T0>(),
             provider.get::<T1>(),
             provider.get::<T2>(),
         )
     }
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
         (
             T0::resolve_prechecked(provider),
             T1::resolve_prechecked(provider),
@@ -89,7 +85,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         T3::ItemPreChecked,
     );
 
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item {
+    fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
             provider.get::<T0>(),
             provider.get::<T1>(),
@@ -97,7 +93,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
             provider.get::<T3>(),
         )
     }
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
         (
             T0::resolve_prechecked(provider),
             T1::resolve_prechecked(provider),
@@ -118,11 +114,9 @@ impl Resolvable for ServiceProvider {
     type Item = ();
     type ItemPreChecked = ServiceProvider;
 
-    fn resolve<'s>(_container: &'s ServiceProvider) -> Self::Item {
-        ()
-    }
+    fn resolve(_container: &ServiceProvider) -> Self::Item {}
 
-    fn resolve_prechecked<'s>(provider: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
         provider.clone()
     }
 }
@@ -196,7 +190,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
     type Item = ServiceIterator<Dynamic<T>>;
     type ItemPreChecked = ServiceIterator<Dynamic<T>>;
 
-    fn resolve<'s>(provider: &'s ServiceProvider) -> Self::Item {
+    fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_by_first_key(
             &provider.producers,
             &TypeId::of::<Dynamic<T>>(),
@@ -209,7 +203,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
         }
     }
 
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(container: &ServiceProvider) -> Self::ItemPreChecked {
         Self::resolve(container)
     }
 }
@@ -218,18 +212,18 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
 
-    fn resolve<'s>(container: &'s ServiceProvider) -> Self::Item {
+    fn resolve(container: &ServiceProvider) -> Self::Item {
         binary_search::binary_search_by_last_key(&container.producers, &TypeId::of::<Self>(), |f| {
             &f.result_type_id
         })
         .map(|f| unsafe { resolve_unchecked::<Self>(container, f) })
     }
 
-    fn resolve_prechecked<'s>(container: &'s ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(container: &ServiceProvider) -> Self::ItemPreChecked {
         Self::resolve(container).unwrap()
     }
     fn add_resolvable_checker(col: &mut ServiceCollection) {
-        col.dep_checkers.push(Box::new(|producers| {
+        col.dep_checkers.push(|producers| {
             match producers[..].binary_search_by_key(&TypeId::of::<Self>(), |f| f.result_type_id) {
                 Ok(_) => None,
                 Err(_) => Some(BuildError::MissingDependency(MissingDependencyType {
@@ -237,6 +231,6 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
                     id: std::any::TypeId::of::<Self>(),
                 })),
             }
-        }))
+        })
     }
 }
