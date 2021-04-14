@@ -5,20 +5,29 @@ use {
     crate::{ServiceProvider, Dynamic}
 };
 
-pub type UntypedFnFactory = Box<dyn Fn(&mut usize) -> UntypedFn>;
+pub type UntypedFnFactory = Box<dyn FnOnce(&mut usize) -> UntypedFn>;
 
 pub struct UntypedFn {
     result_type_id: TypeId,
     pointer: *mut dyn Fn(),
+    wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn
 }
 
 impl UntypedFn {
     pub fn get_result_type_id(&self) -> &TypeId {
         &self.result_type_id
     }
+
+    // Unsafe constraint: Must be called with the same T as it was created
     pub unsafe fn borrow_for<T>(&self) -> &dyn Fn(&ServiceProvider) -> T{
-        let func_ptr = self.pointer as *const dyn Fn(&ServiceProvider) -> T;
-        &*func_ptr
+        &*(self.pointer as *const dyn Fn(&ServiceProvider) -> T)
+    }
+
+    /// Creates a UntypedFn which ignores it's passed ServiceProvider and always uses the one it's bound to
+    /// Unsafe constraint: `&self` and the value behind `&ServiceProvider` must live longer than the 
+    /// returned UntypedFn
+    pub unsafe fn bind(&self, provider: &ServiceProvider) -> Self {
+        (self.wrapper_creator)(self, provider)
     }
 }
 
@@ -30,6 +39,12 @@ where
         UntypedFn {
             result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
             pointer: Box::into_raw(factory) as *mut dyn Fn(),
+            wrapper_creator: |inner, provider| {
+                let factory : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |_| {
+                    unsafe { ((&*inner).borrow_for::<T>())(&*provider) }
+                });
+                factory.into()
+            }
         }
     }
 }

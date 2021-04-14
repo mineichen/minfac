@@ -41,6 +41,7 @@ use {
     },
     once_cell::sync::OnceCell,
     resolvable::Resolvable,
+    service_provider_factory::{ServiceProviderFactory, ServiceProviderFactoryBuilder},
     untyped::{UntypedFn, UntypedFnFactory, UntypedPointer},
     std::sync::Arc,
 };
@@ -128,10 +129,14 @@ impl ServiceCollection {
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
-        let (producers, service_states_count) = self.validate_producers()?;
+        let (producers, service_states_count) = self.validate_producers(Vec::new())?;
         let service_states = vec![OnceCell::new(); service_states_count];
+        let immutable_state = Arc::new(ServiceProviderImmutableState {
+            producers,
+            _parents: Vec::new()
+        });
         Ok(ServiceProvider {
-            producers: Arc::new(producers),
+            immutable_state,
             service_states: Arc::new(service_states),
         })
     }
@@ -145,17 +150,20 @@ impl ServiceCollection {
     ///
     pub fn build_factory<T: Clone + Any>(
         self,
-    ) -> Result<service_provider_factory::ServiceProviderFactory<T>, BuildError> {
-        service_provider_factory::ServiceProviderFactory::create(self)
+    ) -> Result<ServiceProviderFactory<T>, BuildError> {
+        ServiceProviderFactory::create(self, Vec::new())
     }
 
-    fn validate_producers(self) -> Result<(Vec<UntypedFn>, usize), BuildError> {
+    pub fn with_parent(self, provider: ServiceProvider) -> ServiceProviderFactoryBuilder {
+        ServiceProviderFactoryBuilder::create(self, provider)
+    }
+
+    fn validate_producers(self, mut created: Vec<UntypedFn>) -> Result<(Vec<UntypedFn>, usize), BuildError> {
         let mut service_state_couter = 0;
-        let mut created: Vec<UntypedFn> = self
+        created.extend(self
             .producer_factories
             .into_iter()
-            .map(|x| (x)(&mut service_state_couter))
-            .collect();
+            .map(|x| (x)(&mut service_state_couter)));
 
         created.sort_by_key(|a| *a.get_result_type_id());
         if let Some(err) = self
@@ -218,8 +226,12 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 }
 
 pub struct ServiceProvider {
-    producers: Arc<Vec<UntypedFn>>,
+    immutable_state: Arc<ServiceProviderImmutableState>,
     service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
+}
+struct ServiceProviderImmutableState {
+    producers: Vec<UntypedFn>,
+    _parents: Vec<ServiceProvider>
 }
 
 impl ServiceProvider {
@@ -240,7 +252,7 @@ impl ServiceProvider {
 impl Clone for ServiceProvider {
     fn clone(&self) -> Self {
         Self {
-            producers: self.producers.clone(),
+            immutable_state: self.immutable_state.clone(),
             service_states: self.service_states.clone(),
         }
     }

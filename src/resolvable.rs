@@ -127,7 +127,7 @@ unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(
     pos: usize,
 ) -> T::ItemPreChecked {
     ({
-        let entry = provider.producers.get_unchecked(pos);
+        let entry = provider.immutable_state.producers.get_unchecked(pos);
         debug_assert_eq!(entry.get_result_type_id(), &TypeId::of::<T>());
         entry.borrow_for::<T::ItemPreChecked>()
     })(&provider)
@@ -138,7 +138,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_pos.map(|i| {
-            self.next_pos = if let Some(next) = self.provider.producers.get(i + 1) {
+            self.next_pos = if let Some(next) = self.provider.immutable_state.producers.get(i + 1) {
                 if next.get_result_type_id() == &TypeId::of::<T>() {
                     Some(i + 1)
                 } else {
@@ -159,7 +159,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
         self.next_pos.map(|i| {
             // If has_next, last must exist
             let pos = binary_search::binary_search_last_by_key(
-                &self.provider.producers[i..],
+                &self.provider.immutable_state.producers[i..],
                 &TypeId::of::<T>(),
                 |f| &f.get_result_type_id(),
             )
@@ -174,7 +174,7 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
         self.next_pos
             .map(|i| {
                 let pos = binary_search::binary_search_last_by_key(
-                    &self.provider.producers[i..],
+                    &self.provider.immutable_state.producers[i..],
                     &TypeId::of::<T>(),
                     |f| &f.get_result_type_id(),
                 )
@@ -191,7 +191,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_by_first_key(
-            &provider.producers,
+            &provider.immutable_state.producers,
             &TypeId::of::<Dynamic<T>>(),
             |f| &f.get_result_type_id(),
         );
@@ -212,7 +212,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type ItemPreChecked = T;
 
     fn resolve(container: &ServiceProvider) -> Self::Item {
-        binary_search::binary_search_last_by_key(&container.producers, &TypeId::of::<Self>(), |f| {
+        binary_search::binary_search_last_by_key(&container.immutable_state.producers, &TypeId::of::<Self>(), |f| {
             &f.get_result_type_id()
         })
         .map(|f| unsafe { resolve_unchecked::<Self>(container, f) })
