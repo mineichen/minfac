@@ -2,7 +2,8 @@ use {
     core::{
         any::{Any, TypeId},
     },
-    crate::{ServiceProvider, Dynamic}
+    crate::{ServiceProvider, Dynamic},
+    alloc::boxed::Box
 };
 
 #[derive(Clone)]
@@ -77,7 +78,7 @@ impl UntypedPointer {
 impl Default for UntypedPointer {
     fn default() -> Self {
         Self {
-            pointer: std::ptr::null_mut(),
+            pointer: core::ptr::null_mut(),
             destroyer: |_| {},
         }
     }

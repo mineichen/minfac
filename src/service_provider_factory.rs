@@ -1,4 +1,5 @@
 use {
+    super::*,
     crate::{
         ServiceCollection, 
         ServiceProducer,
@@ -7,7 +8,7 @@ use {
         untyped::UntypedPointer},
     core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
-    std::sync::Arc,
+    alloc::sync::Arc,
 };
 
 /// Does all checks to build a ServiceProvider on premise that an instance of T will be available.
@@ -27,7 +28,7 @@ impl ServiceProviderFactoryBuilder {
     pub fn create(collection: ServiceCollection, first_parent: ServiceProvider) -> Self {
         Self {
             collection,
-            providers: vec!(first_parent)
+            providers: alloc::vec!(first_parent)
         }        
     }
     pub fn build<T: Any + Clone>(self) -> Result<ServiceProviderFactory<T>, super::BuildError> {
@@ -61,9 +62,9 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
 
         collection.producer_factories.push(ServiceProducer::new::<T>(factory));
 
-        let (producers, service_states_count) = collection.validate_producers(parent_service_factories, 1)?;
+        let mut service_states_count = 1;
+        let producers = collection.validate_producers(parent_service_factories, &mut service_states_count)?;
         
-
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
             _parents: parents
@@ -77,7 +78,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
     }
 
     pub fn build(&self, remaining: T) -> ServiceProvider {
-        let service_states = vec![OnceCell::new(); self.service_states_count];
+        let service_states = alloc::vec![OnceCell::new(); self.service_states_count];
 
         service_states.get(ANTICIPATED_SERVICE_POSITION)
             .unwrap()
@@ -95,7 +96,7 @@ mod tests {
     use {
         super::*,
         crate::{BuildError, Dynamic, DynamicServices},
-        std::cell::RefCell,
+        core::cell::RefCell,
     };
 
     // todo: Test dropping ServiceProviderFactory doesn't try to free uninitialized
@@ -110,7 +111,7 @@ mod tests {
         child_provider.register(|| 1);
         let child_factory = child_provider.with_parent(parent).build::<i32>().unwrap();
         let iterator = child_factory.build(2).get::<DynamicServices<i32>>();
-        assert_eq!(vec!(0, 1, 2), iterator.collect::<Vec<_>>());
+        assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
 
     #[test]

@@ -6,7 +6,7 @@
 ///
 pub fn binary_search_by_first_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
-    U: std::cmp::Ord,
+    U: core::cmp::Ord,
     TFn: Fn(&T) -> &U,
 {
     let mut result_idx = None;
@@ -34,7 +34,7 @@ where
 /// slice::binary_search_by_key() seems to return the last entry as well, but docs state that we cant rely on that
 pub fn binary_search_last_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
-    U: std::cmp::Ord,
+    U: core::cmp::Ord,
     TFn: Fn(&T) -> &U,
 {
     let mut result_idx = None;
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(Some(2), binary_search_last_by_key(&[0, 1, 1], &1, |a| a));
         assert_eq!(Some(1), binary_search_last_by_key(&[0, 0, 1], &0, |a| a));
     }
-    
+
     fn test_first_or_last<'a>(i: impl Fn(&[usize], &usize) -> Option<usize>) {
         assert_eq!(Some(0), (i)(&[0, 1, 2], &0));
         assert_eq!(Some(1), (i)(&[0, 1, 2], &1));

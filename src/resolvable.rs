@@ -1,4 +1,4 @@
-use super::*;
+use { super::*, core::iter::{Chain, Empty}};
 
 /// Represents anything resolvable by a ServiceProvider. This
 pub trait Resolvable: Any {
@@ -12,7 +12,7 @@ pub trait Resolvable: Any {
     type ItemPreChecked;
 
     type PrecheckResult;
-    type TypeIdsIter: IntoIterator<Item=TypeId>;
+    type TypeIdsIter: Iterator<Item=TypeId>;
 
     /// Resolves a type with the specified provider. There might be multiple calls to this method with
     /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
@@ -29,7 +29,7 @@ impl Resolvable for () {
     type Item = ();
     type ItemPreChecked = ();
     type PrecheckResult = ();
-    type TypeIdsIter = std::iter::Empty<TypeId>;
+    type TypeIdsIter = core::iter::Empty<TypeId>;
 
     fn resolve(_: &ServiceProvider) -> Self::Item {}
     fn resolve_prechecked(_: &ServiceProvider, _: &Self::PrecheckResult) -> Self::ItemPreChecked {}
@@ -39,7 +39,7 @@ impl Resolvable for () {
     }
 
     fn iter_types() -> Self::TypeIdsIter {
-        std::iter::empty()
+        core::iter::empty()
     }
 }
 
@@ -47,7 +47,7 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult);
-    type TypeIdsIter = std::array::IntoIter<TypeId, 2>;
+    type TypeIdsIter = Chain<T0::TypeIdsIter, T1::TypeIdsIter>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (provider.get::<T0>(), provider.get::<T1>())
@@ -67,7 +67,7 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     }
 
     fn iter_types() -> Self::TypeIdsIter {
-        core::array::IntoIter::new([TypeId::of::<T0>(), TypeId::of::<T1>()])
+        T0::iter_types().chain(T1::iter_types())
     }
 }
 
@@ -75,7 +75,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult, T2::PrecheckResult);
-    type TypeIdsIter = std::array::IntoIter<TypeId, 3>;
+    type TypeIdsIter = core::iter::Chain<core::iter::Chain<T0::TypeIdsIter, T1::TypeIdsIter>, T2::TypeIdsIter>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
@@ -100,11 +100,9 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
     }
 
     fn iter_types() -> Self::TypeIdsIter {
-        core::array::IntoIter::new([
-            TypeId::of::<T0>(), 
-            TypeId::of::<T1>(), 
-            TypeId::of::<T2>()
-        ])
+        T0::iter_types()
+            .chain(T1::iter_types())
+            .chain(T2::iter_types())
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
@@ -118,7 +116,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         T3::ItemPreChecked,
     );
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult, T2::PrecheckResult, T3::PrecheckResult);
-    type TypeIdsIter = std::array::IntoIter<TypeId, 4>;
+    type TypeIdsIter = Chain<Chain<Chain<T0::TypeIdsIter, T1::TypeIdsIter>, T2::TypeIdsIter>, T3::TypeIdsIter>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
@@ -146,12 +144,10 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
     }
     
     fn iter_types() -> Self::TypeIdsIter {
-        core::array::IntoIter::new([
-            TypeId::of::<T0>(), 
-            TypeId::of::<T1>(), 
-            TypeId::of::<T2>(), 
-            TypeId::of::<T3>()
-        ])
+        T0::iter_types()
+            .chain(T1::iter_types())
+            .chain(T2::iter_types())
+            .chain(T3::iter_types())
     }
 }
 
@@ -161,7 +157,7 @@ impl Resolvable for ServiceProvider {
     type Item = ();
     type ItemPreChecked = ServiceProvider;
     type PrecheckResult = ();
-    type TypeIdsIter = std::iter::Empty<TypeId>;
+    type TypeIdsIter = Empty<TypeId>;
 
     fn resolve(_container: &ServiceProvider) -> Self::Item {}
 
@@ -174,7 +170,7 @@ impl Resolvable for ServiceProvider {
     }
 
     fn iter_types() -> Self::TypeIdsIter {
-        std::iter::empty()
+        core::iter::empty()
     }
 }
 
@@ -190,7 +186,7 @@ unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(
     })(&provider)
 }
 
-impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
+impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> {
     type Item = T::ItemPreChecked;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -247,7 +243,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
     type Item = ServiceIterator<Dynamic<T>>;
     type ItemPreChecked = ServiceIterator<Dynamic<T>>;
     type PrecheckResult = ();
-    type TypeIdsIter = std::vec::IntoIter<TypeId>;
+    type TypeIdsIter = alloc::vec::IntoIter<TypeId>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_by_first_key(
@@ -280,7 +276,7 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
     type PrecheckResult = usize;
-    type TypeIdsIter = std::iter::Empty<TypeId>;
+    type TypeIdsIter = core::iter::Empty<TypeId>;
 
     fn resolve(container: &ServiceProvider) -> Self::Item {
         binary_search::binary_search_last_by_key(
@@ -304,6 +300,6 @@ impl<T: Any> resolvable::Resolvable for Dynamic<T> {
     }
 
     fn iter_types() -> Self::TypeIdsIter {
-        std::iter::empty()
+        core::iter::empty()
     }
 }

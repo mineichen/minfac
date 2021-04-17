@@ -34,9 +34,13 @@
 //!
 //! Visit the documentation for more details
 
+#![no_std]
+
+extern crate alloc;
+
 use {
     core::{
-        any::{Any, TypeId},
+        any::{Any, TypeId, type_name},
         marker::PhantomData,
         fmt::Debug,
     },
@@ -44,7 +48,7 @@ use {
     resolvable::Resolvable,
     service_provider_factory::{ServiceProviderFactory, ServiceProviderFactoryBuilder},
     untyped::{UntypedFn, UntypedPointer},
-    std::sync::Arc,
+    alloc::{sync::Arc, vec::Vec, boxed::Box, string::String},
 };
 
 mod binary_search;
@@ -93,14 +97,14 @@ type DependencyChecker = fn(&Vec<ServiceProducer>) -> Option<BuildError>;
 type UntypedFnFactory = Box<dyn for<'a> FnOnce(&mut UntypedFnFactoryContext<'a>) -> Result<(UntypedFn, Option<DependencyChecker>),BuildError>>;
 
 struct UntypedFnFactoryContext<'a> {
-    service_state_counter: usize,
+    service_state_counter: &'a mut usize,
     service_types: &'a Vec<TypeId>
 }
 
 impl<'a> UntypedFnFactoryContext<'a> {
     fn increment(&mut self) -> usize {
-        let result: usize = self.service_state_counter;
-        self.service_state_counter += 1;
+        let result: usize = *self.service_state_counter;
+        *self.service_state_counter += 1;
         result
     }
 }
@@ -158,8 +162,9 @@ impl ServiceCollection {
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
-        let (producers, service_states_count) = self.validate_producers(Vec::new(), 0)?;
-        let service_states = vec![OnceCell::new(); service_states_count];
+        let mut service_states_count = 0;
+        let producers = self.validate_producers(Vec::new(), &mut service_states_count)?;
+        let service_states = alloc::vec![OnceCell::new(); service_states_count];
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
             _parents: Vec::new()
@@ -190,8 +195,8 @@ impl ServiceCollection {
     fn validate_producers(
         self, 
         mut factories: Vec<ServiceProducer>,
-        service_state_counter: usize
-    ) -> Result<(Vec<UntypedFn>, usize), BuildError> {
+        service_state_counter: &mut usize
+    ) -> Result<Vec<UntypedFn>, BuildError> {
         
         factories.extend(self
             .producer_factories
@@ -204,14 +209,16 @@ impl ServiceCollection {
             .map(|f| f.type_id)
             .collect();
             
-        let mut ctx = UntypedFnFactoryContext { service_state_counter, service_types: &mut types };
         let mut producers = Vec::with_capacity(factories.len());
+        let mut cycle_checkers = Vec::with_capacity(factories.len());
         for x in  factories.into_iter() {            
-            let (producer, _) = (x.factory)(&mut ctx)?;
+            let mut ctx = UntypedFnFactoryContext { service_state_counter, service_types: &mut types };
+            let (producer, cycle_checker) = (x.factory)(&mut ctx)?;
             debug_assert_eq!(&x.type_id, producer.get_result_type_id());
             producers.push(producer);
+            cycle_checkers.push(cycle_checker);
         }
-        Ok((producers, ctx.service_state_counter))
+        Ok(producers)
     }
 }
 
@@ -231,8 +238,8 @@ pub struct MissingDependencyType {
 impl MissingDependencyType {
     fn new<T: Any>() -> Self {
         Self {
-            name: std::any::type_name::<T>(),
-            id: std::any::TypeId::of::<T>(),
+            name: type_name::<T>(),
+            id: TypeId::of::<T>(),
         }
     }
 }
@@ -274,7 +281,7 @@ pub struct ServiceProvider {
 }
 
 impl Debug for ServiceProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "ServiceProvider (services: {}, with_state: {})", 
             self.immutable_state.producers.len(),
@@ -317,7 +324,11 @@ struct ServiceProviderImmutableState {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use {
+        super::*, 
+        core::cell::RefCell,
+        alloc::rc::Rc
+    };
 
     
     #[test]
@@ -335,19 +346,19 @@ mod tests {
     #[test]
     fn resolve_shared() {
         let mut col = ServiceCollection::new();
-        col.register_arc(|| Arc::new(std::cell::RefCell::new(1)));
+        col.register_arc(|| Arc::new(RefCell::new(1)));
         col.with::<ServiceProvider>()
-            .register_arc(|_| Arc::new(std::cell::RefCell::new(2)));
+            .register_arc(|_| Arc::new(RefCell::new(2)));
 
         let prov = col.build().expect("Should have all Dependencies");
         let second = prov
-            .get::<Dynamic<Arc<std::cell::RefCell<i32>>>>()
+            .get::<Dynamic<Arc<RefCell<i32>>>>()
             .expect("Expecte to get second");
         assert_eq!(2, *second.borrow());
         second.replace(42);
 
         assert_eq!(
-            prov.get::<DynamicServices<Arc<std::cell::RefCell<i32>>>>()
+            prov.get::<DynamicServices<Arc<RefCell<i32>>>>()
                 .map(|c| *c.borrow())
                 .sum::<i32>(),
             1 + 42
@@ -627,22 +638,22 @@ mod tests {
     #[test]
     fn drop_collection_doesnt_call_any_factories() {
         let mut col = ServiceCollection::new();
-        col.register_arc::<std::rc::Rc<()>>(|| { panic!("Should never be called"); });
+        col.register_arc::<Rc<()>>(|| { panic!("Should never be called"); });
         let prov = col.build().unwrap();
         drop(prov);
     }
     #[test]
     fn drop_shareds_after_provider_drop() {
         let mut col = ServiceCollection::new();
-        col.register_arc(|| Arc::new(std::rc::Rc::new(())));
+        col.register_arc(|| Arc::new(alloc::rc::Rc::new(())));
         let prov = col.build().expect("Expected to have all dependencies");
-        let inner = prov.get::<Dynamic<Arc<std::rc::Rc<()>>>>()
+        let inner = prov.get::<Dynamic<Arc<alloc::rc::Rc<()>>>>()
             .expect("Expected to receive the service")
             .as_ref()
             .clone();
 
-        assert_eq!(2, std::rc::Rc::strong_count(&inner));
+        assert_eq!(2, Rc::strong_count(&inner));
         drop(prov);
-        assert_eq!(1, std::rc::Rc::strong_count(&inner));
+        assert_eq!(1, Rc::strong_count(&inner));
     }
 }
