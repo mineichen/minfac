@@ -11,48 +11,71 @@ pub trait Resolvable: Any {
     /// - collection.with::<Singleton<i32>>().register_singleton(|_prechecked_i32: i32| {})
     type ItemPreChecked;
 
+    type PrecheckResult;
+    type TypeIdsIter: IntoIterator<Item=TypeId>;
+
     /// Resolves a type with the specified provider. There might be multiple calls to this method with
     /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
     fn resolve(provider: &ServiceProvider) -> Self::Item;
 
     /// Called internally when resolving dependencies.
-    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked;
+    fn resolve_prechecked(provider: &ServiceProvider, key: &Self::PrecheckResult) -> Self::ItemPreChecked;
 
-    fn add_resolvable_checker(_: &mut ServiceCollection) {}
+    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError>;
+    fn iter_types() -> Self::TypeIdsIter;
 }
 
 impl Resolvable for () {
     type Item = ();
     type ItemPreChecked = ();
+    type PrecheckResult = ();
+    type TypeIdsIter = std::iter::Empty<TypeId>;
 
     fn resolve(_: &ServiceProvider) -> Self::Item {}
-    fn resolve_prechecked(_: &ServiceProvider) -> Self::ItemPreChecked {}
+    fn resolve_prechecked(_: &ServiceProvider, _: &Self::PrecheckResult) -> Self::ItemPreChecked {}
+
+    fn precheck(_ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        Ok(())
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        std::iter::empty()
+    }
 }
 
 impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
+    type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult);
+    type TypeIdsIter = std::array::IntoIter<TypeId, 2>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (provider.get::<T0>(), provider.get::<T1>())
     }
 
-    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider, key: &Self::PrecheckResult) -> Self::ItemPreChecked {
         (
-            T0::resolve_prechecked(provider),
-            T1::resolve_prechecked(provider),
+            T0::resolve_prechecked(provider, &key.0),
+            T1::resolve_prechecked(provider, &key.1),
         )
     }
 
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        T0::add_resolvable_checker(col);
-        T1::add_resolvable_checker(col);
+    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        let r0 = T0::precheck(ordered_types)?; 
+        let r1 = T1::precheck(ordered_types)?; 
+        Ok((r0, r1))
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        core::array::IntoIter::new([TypeId::of::<T0>(), TypeId::of::<T1>()])
     }
 }
 
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
+    type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult, T2::PrecheckResult);
+    type TypeIdsIter = std::array::IntoIter<TypeId, 3>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
@@ -61,17 +84,27 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
             provider.get::<T2>(),
         )
     }
-    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider, key: &Self::PrecheckResult) -> Self::ItemPreChecked {
         (
-            T0::resolve_prechecked(provider),
-            T1::resolve_prechecked(provider),
-            T2::resolve_prechecked(provider),
+            T0::resolve_prechecked(provider, &key.0),
+            T1::resolve_prechecked(provider, &key.1),
+            T2::resolve_prechecked(provider, &key.2),
         )
     }
-    fn add_resolvable_checker(collection: &mut ServiceCollection) {
-        T0::add_resolvable_checker(collection);
-        T1::add_resolvable_checker(collection);
-        T2::add_resolvable_checker(collection);
+
+    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        let r0 = T0::precheck(ordered_types)?; 
+        let r1 = T1::precheck(ordered_types)?; 
+        let r2 = T2::precheck(ordered_types)?; 
+        Ok((r0, r1, r2))
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        core::array::IntoIter::new([
+            TypeId::of::<T0>(), 
+            TypeId::of::<T1>(), 
+            TypeId::of::<T2>()
+        ])
     }
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
@@ -84,6 +117,8 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         T2::ItemPreChecked,
         T3::ItemPreChecked,
     );
+    type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult, T2::PrecheckResult, T3::PrecheckResult);
+    type TypeIdsIter = std::array::IntoIter<TypeId, 4>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
@@ -93,31 +128,53 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
             provider.get::<T3>(),
         )
     }
-    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider, key: &Self::PrecheckResult) -> Self::ItemPreChecked {
         (
-            T0::resolve_prechecked(provider),
-            T1::resolve_prechecked(provider),
-            T2::resolve_prechecked(provider),
-            T3::resolve_prechecked(provider),
+            T0::resolve_prechecked(provider, &key.0),
+            T1::resolve_prechecked(provider, &key.1),
+            T2::resolve_prechecked(provider, &key.2),
+            T3::resolve_prechecked(provider, &key.3),
         )
     }
-    fn add_resolvable_checker(collection: &mut ServiceCollection) {
-        T0::add_resolvable_checker(collection);
-        T1::add_resolvable_checker(collection);
-        T2::add_resolvable_checker(collection);
-        T3::add_resolvable_checker(collection);
+    
+    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        let r0 = T0::precheck(ordered_types)?; 
+        let r1 = T1::precheck(ordered_types)?; 
+        let r2 = T2::precheck(ordered_types)?; 
+        let r3 = T3::precheck(ordered_types)?; 
+        Ok((r0, r1, r2, r3))
+    }
+    
+    fn iter_types() -> Self::TypeIdsIter {
+        core::array::IntoIter::new([
+            TypeId::of::<T0>(), 
+            TypeId::of::<T1>(), 
+            TypeId::of::<T2>(), 
+            TypeId::of::<T3>()
+        ])
     }
 }
 
 impl Resolvable for ServiceProvider {
+
     // Doesn't make sense to call from the outside
     type Item = ();
     type ItemPreChecked = ServiceProvider;
+    type PrecheckResult = ();
+    type TypeIdsIter = std::iter::Empty<TypeId>;
 
     fn resolve(_container: &ServiceProvider) -> Self::Item {}
 
-    fn resolve_prechecked(provider: &ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(provider: &ServiceProvider, _: &Self::PrecheckResult) -> Self::ItemPreChecked {
         provider.clone()
+    }
+    
+    fn precheck(_: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        Ok(())
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        std::iter::empty()
     }
 }
 
@@ -186,8 +243,11 @@ impl<'a, T: resolvable::Resolvable> std::iter::Iterator for ServiceIterator<T> {
 }
 
 impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
+
     type Item = ServiceIterator<Dynamic<T>>;
     type ItemPreChecked = ServiceIterator<Dynamic<T>>;
+    type PrecheckResult = ();
+    type TypeIdsIter = std::vec::IntoIter<TypeId>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_by_first_key(
@@ -202,34 +262,48 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
         }
     }
 
-    fn resolve_prechecked(container: &ServiceProvider) -> Self::ItemPreChecked {
+    fn resolve_prechecked(container: &ServiceProvider, _: &Self::PrecheckResult) -> Self::ItemPreChecked {
         Self::resolve(container)
+    }
+    
+    fn precheck(_: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        Ok(())
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        Vec::new().into_iter()
     }
 }
 
 impl<T: Any> resolvable::Resolvable for Dynamic<T> {
+
     type Item = Option<T>;
     type ItemPreChecked = T;
+    type PrecheckResult = usize;
+    type TypeIdsIter = std::iter::Empty<TypeId>;
 
     fn resolve(container: &ServiceProvider) -> Self::Item {
-        binary_search::binary_search_last_by_key(&container.immutable_state.producers, &TypeId::of::<Self>(), |f| {
-            &f.get_result_type_id()
-        })
-        .map(|f| unsafe { resolve_unchecked::<Self>(container, f) })
+        binary_search::binary_search_last_by_key(
+            &container.immutable_state.producers,
+            &TypeId::of::<Self>(), |f| {
+                &f.get_result_type_id()
+            })
+        .map(|index| unsafe { resolve_unchecked::<Self>(container, index) })
     }
 
-    fn resolve_prechecked(container: &ServiceProvider) -> Self::ItemPreChecked {
-        Self::resolve(container).unwrap()
+    fn resolve_prechecked(container: &ServiceProvider, index: &Self::PrecheckResult) -> Self::ItemPreChecked {
+        unsafe { resolve_unchecked::<Self>(container, *index) }
     }
-    fn add_resolvable_checker(col: &mut ServiceCollection) {
-        col.dep_checkers.push(|producers| {
-            match producers[..].binary_search_by_key(&TypeId::of::<Self>(), |f| *f.get_result_type_id()) {
-                Ok(_) => None,
-                Err(_) => Some(BuildError::MissingDependency(MissingDependencyType {
-                    name: std::any::type_name::<Self>(),
-                    id: std::any::TypeId::of::<Self>(),
-                })),
-            }
-        })
+    
+    fn precheck(producers: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+        binary_search::binary_search_last_by_key(
+            &producers,
+            &TypeId::of::<Self>(),
+            |f| &f
+        ).ok_or(BuildError::MissingDependency(super::MissingDependencyType::new::<Self>()))
+    }
+
+    fn iter_types() -> Self::TypeIdsIter {
+        std::iter::empty()
     }
 }

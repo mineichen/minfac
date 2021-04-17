@@ -1,6 +1,7 @@
 use {
     crate::{
         ServiceCollection, 
+        ServiceProducer,
         ServiceProvider,
         ServiceProviderImmutableState,
         untyped::UntypedPointer},
@@ -34,31 +35,34 @@ impl ServiceProviderFactoryBuilder {
     }
 }
 
+const ANTICIPATED_SERVICE_POSITION : usize = 0;
+
 impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn create(mut collection: ServiceCollection, parents: Vec<ServiceProvider>) -> Result<Self, super::BuildError> {
-        let parent: Vec<_> = parents.iter()
-            .flat_map(|parent| parent
+        let parent_service_factories: Vec<_> = parents.iter()
+            .flat_map(|parent| {
+                parent
                 .immutable_state
                 .producers.iter()
-                .map(move |parent_producer| 
-                    unsafe { parent_producer.bind(parent)}
-                )
-            )
+                .map(move |parent_producer| {
+                    // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
+                    let factory = unsafe { parent_producer.bind(parent)};
+                    ServiceProducer::new_with_type(Box::new(move |_| Ok((factory, None))), *parent_producer.get_result_type_id())
+                })
+            })
             .collect();
-
-        let factory: crate::UntypedFnFactory = Box::new(move |service_state_counter| {
-            let service_state_idx: usize = *service_state_counter;
-            *service_state_counter += 1;
-
+        
+        let factory: crate::UntypedFnFactory = Box::new(move |_service_state_counter| {
             let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |provider| {
-                provider.get_or_initialize_pos(service_state_idx, || unreachable!())
+                provider.get_or_initialize_pos(ANTICIPATED_SERVICE_POSITION, || unreachable!())
             });
-            creator.into()
+            Ok((creator.into(), None))
         });
 
-        collection.producer_factories.push(factory);
+        collection.producer_factories.push(ServiceProducer::new::<T>(factory));
 
-        let (producers, service_states_count) = collection.validate_producers(parent)?;
+        let (producers, service_states_count) = collection.validate_producers(parent_service_factories, 1)?;
+        
 
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
@@ -75,8 +79,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn build(&self, remaining: T) -> ServiceProvider {
         let service_states = vec![OnceCell::new(); self.service_states_count];
 
-        service_states
-            .last()
+        service_states.get(ANTICIPATED_SERVICE_POSITION)
             .unwrap()
             .get_or_init(|| UntypedPointer::new(remaining));
 
@@ -94,6 +97,9 @@ mod tests {
         crate::{BuildError, Dynamic, DynamicServices},
         std::cell::RefCell,
     };
+
+    // todo: Test dropping ServiceProviderFactory doesn't try to free uninitialized
+
     #[test]
     fn services_are_returned_in_correct_order() {
         let mut parent_provider = ServiceCollection::new();

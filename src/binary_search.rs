@@ -1,6 +1,7 @@
-/// Returns the first position of
-/// Modified version with positive number index
+/// Returns the first position of the needle in the input if any
 /// This function is optimized for searching input with multiple occurences of needle
+///
+/// Modified version with positive number index
 /// https://www.geeksforgeeks.org/find-first-and-last-positions-of-an-element-in-a-sorted-array/
 ///
 pub fn binary_search_by_first_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
@@ -77,6 +78,7 @@ mod tests {
         assert_eq!(Some(2), binary_search_last_by_key(&[0, 1, 1], &1, |a| a));
         assert_eq!(Some(1), binary_search_last_by_key(&[0, 0, 1], &0, |a| a));
     }
+    
     fn test_first_or_last<'a>(i: impl Fn(&[usize], &usize) -> Option<usize>) {
         assert_eq!(Some(0), (i)(&[0, 1, 2], &0));
         assert_eq!(Some(1), (i)(&[0, 1, 2], &1));

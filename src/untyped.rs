@@ -5,13 +5,13 @@ use {
     crate::{ServiceProvider, Dynamic}
 };
 
-pub type UntypedFnFactory = Box<dyn FnOnce(&mut usize) -> UntypedFn>;
-
+#[derive(Clone)]
 pub struct UntypedFn {
     result_type_id: TypeId,
     pointer: *mut dyn Fn(),
     wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn
 }
+
 
 impl UntypedFn {
     pub fn get_result_type_id(&self) -> &TypeId {
@@ -26,7 +26,7 @@ impl UntypedFn {
     /// Creates a UntypedFn which ignores it's passed ServiceProvider and always uses the one it's bound to
     /// Unsafe constraint: `&self` and the value behind `&ServiceProvider` must live longer than the 
     /// returned UntypedFn
-    pub unsafe fn bind(&self, provider: &ServiceProvider) -> Self {
+    pub unsafe fn bind(&self, provider: *const ServiceProvider) -> Self {
         (self.wrapper_creator)(self, provider)
     }
 }
@@ -57,14 +57,14 @@ impl Drop for UntypedFn {
 
 #[derive(Clone)]
 pub struct UntypedPointer {
-    pointer: usize,
-    destroyer: fn(usize),
+    pointer: *mut (),
+    destroyer: fn(*mut ()),
 }
 
 impl UntypedPointer {
     pub fn new<T>(data: T) -> Self {
         Self {
-            pointer: Box::into_raw(Box::new(data)) as usize,
+            pointer: Box::into_raw(Box::new(data)) as *mut (),
             destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
         }
     }
@@ -77,7 +77,7 @@ impl UntypedPointer {
 impl Default for UntypedPointer {
     fn default() -> Self {
         Self {
-            pointer: 0,
+            pointer: std::ptr::null_mut(),
             destroyer: |_| {},
         }
     }
@@ -85,7 +85,7 @@ impl Default for UntypedPointer {
 
 impl Drop for UntypedPointer {
     fn drop(&mut self) {
-        if self.pointer != 0 {
+        if !self.pointer.is_null() {
             (self.destroyer)(self.pointer)
         }
     }

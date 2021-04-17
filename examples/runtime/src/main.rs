@@ -1,5 +1,7 @@
 use {ioc_rs::Dynamic, std::sync::Arc};
 
+type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
+
 ///
 /// # Expected output
 ///
@@ -13,9 +15,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lib = libloading::Library::new("target/debug/libplugin.dylib")?;
     let mut container = ioc_rs::ServiceCollection::new();
     container.register(|| 42);
+    
     unsafe {
-        let func: libloading::Symbol<unsafe extern "C" fn(&mut ioc_rs::ServiceCollection)> =
-            lib.get(b"register")?;
+        let func: libloading::Symbol<ServiceRegistrar> = lib.get(b"register")?;
         func(&mut container);
     }
 
