@@ -4,7 +4,7 @@
 /// Modified version with positive number index
 /// https://www.geeksforgeeks.org/find-first-and-last-positions-of-an-element-in-a-sorted-array/
 ///
-pub fn binary_search_by_first_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
+pub fn binary_search_first_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
     U: core::cmp::Ord,
     TFn: Fn(&T) -> &U,
@@ -65,10 +65,10 @@ mod tests {
 
     #[test]
     fn test_binary_search_by_first_key() {
-        test_first_or_last(|i, e| binary_search_by_first_key(i, e, |extr| extr));
+        test_first_or_last(|i, e| binary_search_first_by_key(i, e, |extr| extr));
 
-        assert_eq!(Some(0), binary_search_by_first_key(&[0, 0, 0], &0, |a| a));
-        assert_eq!(Some(1), binary_search_by_first_key(&[0, 1, 1], &1, |a| a));
+        assert_eq!(Some(0), binary_search_first_by_key(&[0, 0, 0], &0, |a| a));
+        assert_eq!(Some(1), binary_search_first_by_key(&[0, 1, 1], &1, |a| a));
     }
 
     #[test]

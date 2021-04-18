@@ -4,11 +4,10 @@ IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 # Features
 - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 - Service registration from separately compiled dynamic libraries. see `examples/` for more details
-- Minimal type wrapping. Transient Services are retrieved by `T` directly, SharedServices by `Arc<T>`
-- Service discovery, e.g. `service_provider.get::<TransientServices<i32>>()` returns an iterator of all registered i32
+- No redundant type wrapping. Transient Services are retrieved as `T` directly, SharedServices as `Arc<T>`
+- Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an iterator over all registered i32
 - Fail fast. When building a `ServiceProvider`, all dependencies of registered services have to be resolvable. 
-- Fail early. If just a single dependency misses, `build()` fails
-- #[no_std] with only `extern crate alloc;` will be possible to be widely usable
+- #[no_std]
 
 # Example
 ```rust

@@ -23,14 +23,20 @@
 //! collection.register_arc(|| Arc::new(3i8));
 //! collection.register(|| 4i16);
 //!
-//! let provider = collection.build().expect("All dependencies are resolvable");
+//! let provider = collection.build().expect("All dependencies should be resolvable");
 //! assert_eq!(Some(Arc::new(3)), provider.get::<Dynamic<Arc<i8>>>()); // Last registered i8
 //! assert_eq!(Some(4+2000+(1+2+3)+(2*4)), provider.get::<Dynamic<i64>>()); // composed i64
 //! ```
-//! # Notes
-//! - Registration is order independent
-//! - Registration can occur in separately compiled dynamic lib (see /examples)
-//! - Types requested as dependencies (.with<>()) are, in contrast to ServiceProvider.get(), not Options, because their existance is asserted at ServiceCollection.build()
+//! # Features
+//! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
+//! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
+//! - No redundant reference counting. Transient Services are retrieved as `T`, SharedServices as `Arc<T>`
+//! - Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an iterator over all registered i32
+//! - Fail fast. When building a `ServiceProvider`, all dependencies of registered services have to be resolvable.
+//! - Common pitfalls of traditional IOC are prevented by design
+//!   - Shared services cannot reference scoped services (see examples/scoped_services.rs)
+//!   - Shared services cannot outlive their `ServiceProvider`
+//! - #[no_std]
 //!
 //! Visit the documentation for more details
 
@@ -39,16 +45,16 @@
 extern crate alloc;
 
 use {
+    alloc::{boxed::Box, collections::BTreeMap,string::{String, ToString}, sync::Arc, vec, vec::Vec},
     core::{
-        any::{Any, TypeId, type_name},
-        marker::PhantomData,
+        any::{type_name, Any, TypeId},
         fmt::Debug,
+        marker::PhantomData,
     },
     once_cell::sync::OnceCell,
     resolvable::Resolvable,
     service_provider_factory::{ServiceProviderFactory, ServiceProviderFactoryBuilder},
     untyped::{UntypedFn, UntypedPointer},
-    alloc::{sync::Arc, vec::Vec, boxed::Box, string::String},
 };
 
 mod binary_search;
@@ -56,24 +62,23 @@ mod resolvable;
 mod service_provider_factory;
 mod untyped;
 
-/// Represents instances of a type `T` within a `ServiceProvider`
+/// Type used to retreive all instances of `T` of a `ServiceProvider`
 pub struct ServiceIterator<T> {
-    ///
     next_pos: Option<usize>,
     provider: ServiceProvider,
     item_type: PhantomData<T>,
 }
 
-/// Represents a query for the last registered instance of `T` by value.
+/// Represents a query for the last registered instance of `T`
 pub struct Dynamic<T: Any>(PhantomData<T>);
 
-/// Represents a Query for all registered instances of Type `T`. Each of those is given by value.
+/// Represents a Query for all registered instances of Type `T`.
 pub struct DynamicServices<T: Any>(PhantomData<T>);
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
-    producer_factories: Vec<ServiceProducer>
+    producer_factories: Vec<ServiceProducer>,
 }
 
 struct ServiceProducer {
@@ -86,26 +91,36 @@ impl ServiceProducer {
         Self::new_with_type(factory, TypeId::of::<Dynamic<T>>())
     }
     fn new_with_type(factory: UntypedFnFactory, type_id: TypeId) -> Self {
-        Self {
-            factory,
-            type_id
-        }
+        Self { factory, type_id }
     }
 }
 // type CycleChecker = fn() -> Option<BuildError>;
-type DependencyChecker = fn(&Vec<ServiceProducer>) -> Option<BuildError>;
-type UntypedFnFactory = Box<dyn for<'a> FnOnce(&mut UntypedFnFactoryContext<'a>) -> Result<(UntypedFn, Option<DependencyChecker>),BuildError>>;
+type UntypedFnFactory =
+    Box<dyn for<'a> FnOnce(&mut UntypedFnFactoryContext<'a>) -> Result<UntypedFn, BuildError>>;
 
 struct UntypedFnFactoryContext<'a> {
-    service_state_counter: &'a mut usize,
-    service_types: &'a Vec<TypeId>
+    service_descriptor_pos: usize,
+    state_counter: &'a mut usize,
+    final_ordered_types: &'a Vec<TypeId>,
+    cyclic_reference_candidates:
+        &'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>,
 }
 
 impl<'a> UntypedFnFactoryContext<'a> {
-    fn increment(&mut self) -> usize {
-        let result: usize = *self.service_state_counter;
-        *self.service_state_counter += 1;
+    fn reserve_state_space(&mut self) -> usize {
+        let result: usize = *self.state_counter;
+        *self.state_counter += 1;
         result
+    }
+    fn register_cyclic_reference_candidate(
+        &mut self,
+        type_name: &'static str,
+        dependencies: Box<dyn Iterator<Item = usize>>,
+    ) {
+        self.cyclic_reference_candidates.insert(
+            self.service_descriptor_pos,
+            (false, type_name, dependencies),
+        );
     }
 }
 
@@ -113,7 +128,7 @@ impl ServiceCollection {
     /// Creates an empty ServiceCollection
     pub fn new() -> Self {
         Self {
-            producer_factories: Vec::new()
+            producer_factories: Vec::new(),
         }
     }
 }
@@ -136,9 +151,10 @@ impl ServiceCollection {
         let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |_: &ServiceProvider| creator());
-            Ok((func.into(), None))
+            Ok(func.into())
         });
-        self.producer_factories.push(ServiceProducer::new::<T>(factory));
+        self.producer_factories
+            .push(ServiceProducer::new::<T>(factory));
     }
 
     /// Registers a shared service without dependencies.
@@ -148,15 +164,16 @@ impl ServiceCollection {
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent memory leaks.
     pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn() -> Arc<T>) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
-            let service_state_idx = ctx.increment();
+            let service_state_idx = ctx.reserve_state_space();
 
             let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
                 Box::new(move |provider: &ServiceProvider| {
                     provider.get_or_initialize_pos(service_state_idx, creator)
                 });
-            Ok((func.into(), None))
+            Ok(func.into())
         });
-        self.producer_factories.push(ServiceProducer::new::<Arc<T>>(factory));
+        self.producer_factories
+            .push(ServiceProducer::new::<Arc<T>>(factory));
     }
 
     /// Checks, if all dependencies of registered services are available.
@@ -164,10 +181,10 @@ impl ServiceCollection {
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
         let mut service_states_count = 0;
         let producers = self.validate_producers(Vec::new(), &mut service_states_count)?;
-        let service_states = alloc::vec![OnceCell::new(); service_states_count];
+        let service_states = vec![OnceCell::new(); service_states_count];
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
-            _parents: Vec::new()
+            _parents: Vec::new(),
         });
         Ok(ServiceProvider {
             immutable_state,
@@ -182,9 +199,7 @@ impl ServiceCollection {
     ///
     /// Unlike shared services, this service's reference counter isn't checked to equal zero when the provider is dropped
     ///
-    pub fn build_factory<T: Clone + Any>(
-        self,
-    ) -> Result<ServiceProviderFactory<T>, BuildError> {
+    pub fn build_factory<T: Clone + Any>(self) -> Result<ServiceProviderFactory<T>, BuildError> {
         ServiceProviderFactory::create(self, Vec::new())
     }
 
@@ -193,32 +208,80 @@ impl ServiceCollection {
     }
 
     fn validate_producers(
-        self, 
+        self,
         mut factories: Vec<ServiceProducer>,
-        service_state_counter: &mut usize
+        state_counter: &mut usize,
     ) -> Result<Vec<UntypedFn>, BuildError> {
-        
-        factories.extend(self
-            .producer_factories
-            .into_iter());
-            
+        factories.extend(self.producer_factories.into_iter());
+
         factories.sort_by_key(|a| a.type_id);
-       
-        // Todo: Avoid additional iteration here
-        let mut types : Vec<TypeId> = factories.iter()
-            .map(|f| f.type_id)
-            .collect();
-            
+
+        let mut final_ordered_types: Vec<TypeId> = factories.iter().map(|f| f.type_id).collect();
+
+        let mut cyclic_reference_candidates = BTreeMap::new();
         let mut producers = Vec::with_capacity(factories.len());
-        let mut cycle_checkers = Vec::with_capacity(factories.len());
-        for x in  factories.into_iter() {            
-            let mut ctx = UntypedFnFactoryContext { service_state_counter, service_types: &mut types };
-            let (producer, cycle_checker) = (x.factory)(&mut ctx)?;
+
+        for (i, x) in factories.into_iter().enumerate() {
+            let mut ctx = UntypedFnFactoryContext {
+                state_counter,
+                final_ordered_types: &mut final_ordered_types,
+                cyclic_reference_candidates: &mut cyclic_reference_candidates,
+                service_descriptor_pos: i,
+            };
+            let producer = (x.factory)(&mut ctx)?;
             debug_assert_eq!(&x.type_id, producer.get_result_type_id());
             producers.push(producer);
-            cycle_checkers.push(cycle_checker);
         }
+
+        CycleChecker(&mut cyclic_reference_candidates).ok().map_err(|indices| {
+            BuildError::CyclicDependency(
+                indices.into_iter()
+                    .skip(1)
+                    .map(|i| cyclic_reference_candidates.get(&i).unwrap().1)
+                    .fold(
+                        cyclic_reference_candidates.values().next().unwrap().1.to_string(),
+                        |acc, n| acc + " -> " + n
+                    )
+                )
+            })?;
+        
+
         Ok(producers)
+    }
+}
+
+struct CycleChecker<'a>(&'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>);
+
+impl<'a> CycleChecker<'a> {
+    fn ok(self) -> Result<(), Vec<usize>> {
+        let mut stack = Vec::new();
+        while let Some((pos, _)) = self.0.iter().next() {
+            stack.push(*pos);
+            while let Some(current) = stack.last() {
+                if let Some((visited_already, _, iter)) = self.0.get_mut(current)
+                {
+                    if *visited_already {
+                        return Err(stack);
+                    }
+                    *visited_already = true;
+                    match iter.next() {
+                        Some(x) => {
+                            stack.push(x);
+                            continue;
+                        }
+                        None => {
+                            self.0.remove(current);
+                        }
+                    };
+                }
+                stack.pop();
+                if let Some(parent) = stack.last() {
+                    let state = self.0.get_mut(parent).unwrap();
+                    state.0 = false;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -248,20 +311,34 @@ pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, Phan
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
     pub fn register<T: Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
-            let key = TDep::precheck(ctx.service_types)?;
+            let key = TDep::precheck(ctx.final_ordered_types)?;
+            ctx.register_cyclic_reference_candidate(
+                core::any::type_name::<TDep::ItemPreChecked>(),
+                Box::new(TDep::iter_positions(
+                    ctx.final_ordered_types,
+                ))
+            );
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |container: &ServiceProvider| {
                     let arg = TDep::resolve_prechecked(container, &key);
                     creator(arg)
                 });
-            Ok((func.into(), Some(|_| { None })))
+            Ok(func.into())
         });
-        self.0.producer_factories.push(ServiceProducer::new::<T>(factory));
+        self.0
+            .producer_factories
+            .push(ServiceProducer::new::<T>(factory));
     }
     pub fn register_arc<T: Any + ?Sized>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
-            let service_state_idx = ctx.increment();
-            let key = TDep::precheck(ctx.service_types)?;
+            let service_state_idx = ctx.reserve_state_space();
+            let key = TDep::precheck(ctx.final_ordered_types)?;
+            ctx.register_cyclic_reference_candidate(
+                core::any::type_name::<TDep::ItemPreChecked>(),
+                Box::new(TDep::iter_positions(
+                    ctx.final_ordered_types,
+                ))
+            );
             let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
                 Box::new(move |provider: &ServiceProvider| {
                     let moved_key = &key;
@@ -269,12 +346,18 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
                         creator(TDep::resolve_prechecked(provider, &moved_key))
                     })
                 });
-            Ok((func.into(), None))
+            Ok(func.into())
         });
-        self.0.producer_factories.push(ServiceProducer::new::<Arc<T>>(factory));
+        self.0
+            .producer_factories
+            .push(ServiceProducer::new::<Arc<T>>(factory));
     }
 }
 
+/// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
+/// to retreive services by type. ServiceProviders are final and cannot be modified anymore. When a ServiceProvider goes
+/// out of scope, all of its clones and retreived shared services have to be dropped too. Otherwise
+/// dropping the original ServiceProvider panics
 pub struct ServiceProvider {
     immutable_state: Arc<ServiceProviderImmutableState>,
     service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
@@ -283,7 +366,7 @@ pub struct ServiceProvider {
 impl Debug for ServiceProvider {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "ServiceProvider (services: {}, with_state: {})", 
+            "ServiceProvider (services: {}, with_state: {})",
             self.immutable_state.producers.len(),
             self.service_states.len()
         ))
@@ -294,7 +377,11 @@ impl ServiceProvider {
     pub fn get<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
     }
-    fn get_or_initialize_pos<T: Clone, TFn: Fn() -> T>(&self, index: usize, initializer: TFn) -> T {
+    fn get_or_initialize_pos<T: Clone + Any, TFn: Fn() -> T>(
+        &self,
+        index: usize,
+        initializer: TFn,
+    ) -> T {
         let pointer = self
             .service_states
             .get(index)
@@ -317,20 +404,14 @@ impl Clone for ServiceProvider {
 struct ServiceProviderImmutableState {
     producers: Vec<UntypedFn>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
-    _parents: Vec<ServiceProvider>
+    _parents: Vec<ServiceProvider>,
 }
-
 
 #[cfg(test)]
 mod tests {
 
-    use {
-        super::*, 
-        core::cell::RefCell,
-        alloc::rc::Rc
-    };
+    use {super::*, alloc::rc::Rc, core::cell::RefCell};
 
-    
     #[test]
     fn resolve_last_transient() {
         let mut col = ServiceCollection::new();
@@ -350,15 +431,16 @@ mod tests {
         col.with::<ServiceProvider>()
             .register_arc(|_| Arc::new(RefCell::new(2)));
 
-        let prov = col.build().expect("Should have all Dependencies");
-        let second = prov
+        let provider = col.build().expect("Should have all Dependencies");
+        let service = provider
             .get::<Dynamic<Arc<RefCell<i32>>>>()
             .expect("Expecte to get second");
-        assert_eq!(2, *second.borrow());
-        second.replace(42);
+        assert_eq!(2, *service.borrow());
+        service.replace(42);
 
         assert_eq!(
-            prov.get::<DynamicServices<Arc<RefCell<i32>>>>()
+            provider
+                .get::<DynamicServices<Arc<RefCell<i32>>>>()
                 .map(|c| *c.borrow())
                 .sum::<i32>(),
             1 + 42
@@ -375,6 +457,14 @@ mod tests {
         build_with_missing_dependency_fails::<(Dynamic<String>, Dynamic<i32>)>(&[
             "Dynamic", "String",
         ]);
+    }
+    #[test]
+    fn bla() {
+        let mut map = alloc::collections::BTreeMap::<i32, Box<dyn Iterator<Item = i32>>>::new();
+        map.insert(1, Box::new(vec![2, 2].into_iter()));
+        let first = map.get_mut(&1).unwrap().next().unwrap();
+        let second = map.get_mut(&1).unwrap().next().unwrap();
+        assert_eq!(4, first + second);
     }
     #[test]
     fn build_with_missing_tuple3_dep_fails() {
@@ -638,7 +728,9 @@ mod tests {
     #[test]
     fn drop_collection_doesnt_call_any_factories() {
         let mut col = ServiceCollection::new();
-        col.register_arc::<Rc<()>>(|| { panic!("Should never be called"); });
+        col.register_arc::<Rc<()>>(|| {
+            panic!("Should never be called");
+        });
         let prov = col.build().unwrap();
         drop(prov);
     }
@@ -647,7 +739,8 @@ mod tests {
         let mut col = ServiceCollection::new();
         col.register_arc(|| Arc::new(alloc::rc::Rc::new(())));
         let prov = col.build().expect("Expected to have all dependencies");
-        let inner = prov.get::<Dynamic<Arc<alloc::rc::Rc<()>>>>()
+        let inner = prov
+            .get::<Dynamic<Arc<alloc::rc::Rc<()>>>>()
             .expect("Expected to receive the service")
             .as_ref()
             .clone();

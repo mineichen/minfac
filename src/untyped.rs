@@ -1,18 +1,15 @@
 use {
-    core::{
-        any::{Any, TypeId},
-    },
-    crate::{ServiceProvider, Dynamic},
-    alloc::boxed::Box
+    crate::{Dynamic, ServiceProvider},
+    alloc::boxed::Box,
+    core::any::{Any, TypeId},
 };
 
 #[derive(Clone)]
 pub struct UntypedFn {
     result_type_id: TypeId,
     pointer: *mut dyn Fn(),
-    wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn
+    wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn,
 }
-
 
 impl UntypedFn {
     pub fn get_result_type_id(&self) -> &TypeId {
@@ -20,12 +17,13 @@ impl UntypedFn {
     }
 
     // Unsafe constraint: Must be called with the same T as it was created
-    pub unsafe fn borrow_for<T>(&self) -> &dyn Fn(&ServiceProvider) -> T{
+    pub unsafe fn borrow_for<T: Any>(&self) -> &dyn Fn(&ServiceProvider) -> T {
+        debug_assert_eq!(TypeId::of::<Dynamic<T>>(), self.result_type_id);
         &*(self.pointer as *const dyn Fn(&ServiceProvider) -> T)
     }
 
     /// Creates a UntypedFn which ignores it's passed ServiceProvider and always uses the one it's bound to
-    /// Unsafe constraint: `&self` and the value behind `&ServiceProvider` must live longer than the 
+    /// Unsafe constraint: `&self` and the value behind `&ServiceProvider` must live longer than the
     /// returned UntypedFn
     pub unsafe fn bind(&self, provider: *const ServiceProvider) -> Self {
         (self.wrapper_creator)(self, provider)
@@ -41,11 +39,10 @@ where
             result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
             pointer: Box::into_raw(factory) as *mut dyn Fn(),
             wrapper_creator: |inner, provider| {
-                let factory : Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |_| {
-                    unsafe { ((&*inner).borrow_for::<T>())(&*provider) }
-                });
+                let factory: Box<dyn Fn(&ServiceProvider) -> T> =
+                    Box::new(move |_| unsafe { ((&*inner).borrow_for::<T>())(&*provider) });
                 factory.into()
-            }
+            },
         }
     }
 }
@@ -58,13 +55,17 @@ impl Drop for UntypedFn {
 
 #[derive(Clone)]
 pub struct UntypedPointer {
+    #[cfg(debug_assertions)]
+    debug_type: TypeId,
     pointer: *mut (),
     destroyer: fn(*mut ()),
 }
 
 impl UntypedPointer {
-    pub fn new<T>(data: T) -> Self {
+    pub fn new<T: Any>(data: T) -> Self {
         Self {
+            #[cfg(debug_assertions)]
+            debug_type: TypeId::of::<T>(),
             pointer: Box::into_raw(Box::new(data)) as *mut (),
             destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
         }
@@ -78,6 +79,8 @@ impl UntypedPointer {
 impl Default for UntypedPointer {
     fn default() -> Self {
         Self {
+            #[cfg(debug_assertions)]
+            debug_type: TypeId::of::<()>(),
             pointer: core::ptr::null_mut(),
             destroyer: |_| {},
         }

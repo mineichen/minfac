@@ -1,14 +1,12 @@
 use {
     super::*,
     crate::{
-        ServiceCollection, 
-        ServiceProducer,
-        ServiceProvider,
+        untyped::UntypedPointer, ServiceCollection, ServiceProducer, ServiceProvider,
         ServiceProviderImmutableState,
-        untyped::UntypedPointer},
+    },
+    alloc::sync::Arc,
     core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
-    alloc::sync::Arc,
 };
 
 /// Does all checks to build a ServiceProvider on premise that an instance of T will be available.
@@ -21,53 +19,64 @@ pub struct ServiceProviderFactory<T: Any + Clone> {
 
 pub struct ServiceProviderFactoryBuilder {
     collection: ServiceCollection,
-    providers: Vec<ServiceProvider>
+    providers: Vec<ServiceProvider>,
 }
 
 impl ServiceProviderFactoryBuilder {
     pub fn create(collection: ServiceCollection, first_parent: ServiceProvider) -> Self {
         Self {
             collection,
-            providers: alloc::vec!(first_parent)
-        }        
+            providers: alloc::vec!(first_parent),
+        }
     }
     pub fn build<T: Any + Clone>(self) -> Result<ServiceProviderFactory<T>, super::BuildError> {
         ServiceProviderFactory::create(self.collection, self.providers)
     }
 }
 
-const ANTICIPATED_SERVICE_POSITION : usize = 0;
+const ANTICIPATED_SERVICE_POSITION: usize = 0;
 
 impl<T: Any + Clone> ServiceProviderFactory<T> {
-    pub fn create(mut collection: ServiceCollection, parents: Vec<ServiceProvider>) -> Result<Self, super::BuildError> {
-        let parent_service_factories: Vec<_> = parents.iter()
+    pub fn create(
+        mut collection: ServiceCollection,
+        parents: Vec<ServiceProvider>,
+    ) -> Result<Self, super::BuildError> {
+        let parent_service_factories: Vec<_> = parents
+            .iter()
             .flat_map(|parent| {
                 parent
-                .immutable_state
-                .producers.iter()
-                .map(move |parent_producer| {
-                    // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                    let factory = unsafe { parent_producer.bind(parent)};
-                    ServiceProducer::new_with_type(Box::new(move |_| Ok((factory, None))), *parent_producer.get_result_type_id())
-                })
+                    .immutable_state
+                    .producers
+                    .iter()
+                    .map(move |parent_producer| {
+                        // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
+                        let factory = unsafe { parent_producer.bind(parent) };
+                        ServiceProducer::new_with_type(
+                            Box::new(move |_| Ok(factory)),
+                            *parent_producer.get_result_type_id(),
+                        )
+                    })
             })
             .collect();
-        
+
         let factory: crate::UntypedFnFactory = Box::new(move |_service_state_counter| {
             let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |provider| {
                 provider.get_or_initialize_pos(ANTICIPATED_SERVICE_POSITION, || unreachable!())
             });
-            Ok((creator.into(), None))
+            Ok(creator.into())
         });
 
-        collection.producer_factories.push(ServiceProducer::new::<T>(factory));
+        collection
+            .producer_factories
+            .push(ServiceProducer::new::<T>(factory));
 
         let mut service_states_count = 1;
-        let producers = collection.validate_producers(parent_service_factories, &mut service_states_count)?;
-        
+        let producers =
+            collection.validate_producers(parent_service_factories, &mut service_states_count)?;
+
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
-            _parents: parents
+            _parents: parents,
         });
 
         Ok(ServiceProviderFactory {
@@ -80,7 +89,8 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn build(&self, remaining: T) -> ServiceProvider {
         let service_states = alloc::vec![OnceCell::new(); self.service_states_count];
 
-        service_states.get(ANTICIPATED_SERVICE_POSITION)
+        service_states
+            .get(ANTICIPATED_SERVICE_POSITION)
             .unwrap()
             .get_or_init(|| UntypedPointer::new(remaining));
 
@@ -105,7 +115,9 @@ mod tests {
     fn services_are_returned_in_correct_order() {
         let mut parent_provider = ServiceCollection::new();
         parent_provider.register(|| 0);
-        let parent = parent_provider.build().expect("Building parent failed unexpectedly");
+        let parent = parent_provider
+            .build()
+            .expect("Building parent failed unexpectedly");
 
         let mut child_provider = ServiceCollection::new();
         child_provider.register(|| 1);
@@ -118,13 +130,23 @@ mod tests {
     fn uses_same_parent_arc_for_two_providers_from_the_same_child_factory() {
         let mut parent_provider = ServiceCollection::new();
         parent_provider.register_arc(|| Arc::new(RefCell::new(42)));
-        let parent = parent_provider.build().expect("Building parent failed unexpectedly");
+        let parent = parent_provider
+            .build()
+            .expect("Building parent failed unexpectedly");
 
         let mut child_provider = ServiceCollection::new();
-        child_provider.with::<Dynamic<Arc<RefCell<i32>>>>().register(|i| Box::new(i));
+        child_provider
+            .with::<Dynamic<Arc<RefCell<i32>>>>()
+            .register(|i| Box::new(i));
         let child_factory = child_provider.with_parent(parent).build::<i64>().unwrap();
-        let child1 = child_factory.build(1).get::<Dynamic<Box<Arc<RefCell<i32>>>>>().unwrap();
-        let child2 = child_factory.build(2).get::<Dynamic<Arc<RefCell<i32>>>>().unwrap();
+        let child1 = child_factory
+            .build(1)
+            .get::<Dynamic<Box<Arc<RefCell<i32>>>>>()
+            .unwrap();
+        let child2 = child_factory
+            .build(2)
+            .get::<Dynamic<Arc<RefCell<i32>>>>()
+            .unwrap();
         *child1.borrow_mut() = 43;
         assert_eq!(43, *child2.borrow_mut());
     }

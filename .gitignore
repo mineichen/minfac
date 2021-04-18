@@ -1,6 +1,6 @@
 .vscode
 .DS_Store
-/examples/target
+/examples/distributed_simple/target
 /target
 **/*.rs.bk
 Cargo.lock
