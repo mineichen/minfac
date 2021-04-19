@@ -1,8 +1,8 @@
 //! # IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 //!
-//! Simple example:
+//! Simple example with two services, one of which depends on the other. 
 //! ```
-//! use { ioc_rs::{Registered, ServiceCollection}};
+//! use {ioc_rs::{Registered, ServiceCollection}};
 //!
 //! let mut collection = ServiceCollection::new();
 //! collection
@@ -161,7 +161,7 @@ impl ServiceCollection {
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent memory leaks.
-    pub fn register_shared<T: Any + ?Sized>(&mut self, creator: fn() -> Arc<T>) {
+    pub fn register_shared<T: Any + ?Sized + Send + Sync>(&mut self, creator: fn() -> Arc<T>) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
 
@@ -334,7 +334,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
     }
-    pub fn register_shared<T: Any + ?Sized>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
+    pub fn register_shared<T: Any + ?Sized + Send + Sync>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
             let key = TDep::precheck(ctx.final_ordered_types)?;
@@ -413,7 +413,7 @@ struct ServiceProviderImmutableState {
 #[cfg(test)]
 mod tests {
 
-    use {super::*, alloc::rc::Rc, core::cell::RefCell};
+    use {super::*, alloc::rc::Rc, core::sync::atomic::{AtomicI32, Ordering}};
 
     #[test]
     fn resolve_last_transient() {
@@ -430,21 +430,21 @@ mod tests {
     #[test]
     fn resolve_shared() {
         let mut col = ServiceCollection::new();
-        col.register_shared(|| Arc::new(RefCell::new(1)));
+        col.register_shared(|| Arc::new(AtomicI32::new(1)));
         col.with::<ServiceProvider>()
-            .register_shared(|_| Arc::new(RefCell::new(2)));
+            .register_shared(|_| Arc::new(AtomicI32::new(2)));
 
         let provider = col.build().expect("Should have all Dependencies");
         let service = provider
-            .get::<Registered<Arc<RefCell<i32>>>>()
+            .get::<Registered<Arc<AtomicI32>>>()
             .expect("Expecte to get second");
-        assert_eq!(2, *service.borrow());
-        service.replace(42);
+        assert_eq!(2, service.load(Ordering::Relaxed));
+        service.fetch_add(40, Ordering::Relaxed);
 
         assert_eq!(
             provider
-                .get::<AllRegistered<Arc<RefCell<i32>>>>()
-                .map(|c| *c.borrow())
+                .get::<AllRegistered<Arc<AtomicI32>>>()
+                .map(|c| c.load(Ordering::Relaxed))
                 .sum::<i32>(),
             1 + 42
         );
@@ -699,12 +699,12 @@ mod tests {
         container.register_shared(|| Arc::new(42i32));
         container
             .with::<Registered<Arc<i32>>>()
-            .register_shared(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service>);
+            .register_shared(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service + Send + Sync>);
         let provider = container
             .build()
             .expect("Expected to have all dependencies");
         let service = provider
-            .get::<Registered<Arc<dyn Service>>>()
+            .get::<Registered<Arc<dyn Service + Send + Sync>>>()
             .expect("Expected to get a service");
 
         assert_eq!(42, service.get_value());
@@ -724,7 +724,7 @@ mod tests {
     #[test]
     fn drop_collection_doesnt_call_any_factories() {
         let mut col = ServiceCollection::new();
-        col.register_shared::<Rc<()>>(|| {
+        col.register_shared::<Arc<()>>(|| {
             panic!("Should never be called");
         });
         let prov = col.build().unwrap();
@@ -733,16 +733,16 @@ mod tests {
     #[test]
     fn drop_shareds_after_provider_drop() {
         let mut col = ServiceCollection::new();
-        col.register_shared(|| Arc::new(alloc::rc::Rc::new(())));
+        col.register_shared(|| Arc::new(Arc::new(())));
         let prov = col.build().expect("Expected to have all dependencies");
         let inner = prov
-            .get::<Registered<Arc<alloc::rc::Rc<()>>>>()
+            .get::<Registered<Arc<Arc<()>>>>()
             .expect("Expected to receive the service")
             .as_ref()
             .clone();
 
-        assert_eq!(2, Rc::strong_count(&inner));
+        assert_eq!(2, Arc::strong_count(&inner));
         drop(prov);
-        assert_eq!(1, Rc::strong_count(&inner));
+        assert_eq!(1, Arc::strong_count(&inner));
     }
 }

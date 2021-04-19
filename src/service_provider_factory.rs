@@ -106,7 +106,7 @@ mod tests {
     use {
         super::*,
         crate::{BuildError, Registered, AllRegistered},
-        core::cell::RefCell,
+        core::sync::atomic::{AtomicI32, Ordering},
     };
 
     // todo: Test dropping ServiceProviderFactory doesn't try to free uninitialized
@@ -129,26 +129,26 @@ mod tests {
     #[test]
     fn uses_same_parent_arc_for_two_providers_from_the_same_child_factory() {
         let mut parent_provider = ServiceCollection::new();
-        parent_provider.register_shared(|| Arc::new(RefCell::new(42)));
+        parent_provider.register_shared(|| Arc::new(AtomicI32::new(42)));
         let parent = parent_provider
             .build()
             .expect("Building parent failed unexpectedly");
 
         let mut child_provider = ServiceCollection::new();
         child_provider
-            .with::<Registered<Arc<RefCell<i32>>>>()
+            .with::<Registered<Arc<AtomicI32>>>()
             .register(|i| Box::new(i));
         let child_factory = child_provider.with_parent(parent).build::<i64>().unwrap();
         let child1 = child_factory
             .build(1)
-            .get::<Registered<Box<Arc<RefCell<i32>>>>>()
+            .get::<Registered<Box<Arc<AtomicI32>>>>()
             .unwrap();
         let child2 = child_factory
             .build(2)
-            .get::<Registered<Arc<RefCell<i32>>>>()
+            .get::<Registered<Arc<AtomicI32>>>()
             .unwrap();
-        *child1.borrow_mut() = 43;
-        assert_eq!(43, *child2.borrow_mut());
+        child1.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(43, child2.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -171,21 +171,21 @@ mod tests {
     fn arcs_without_dependencies_are_not_shared_between_two_provider_produced_by_the_same_factory()
     {
         let mut collection = ServiceCollection::new();
-        collection.register_shared(|| Arc::new(RefCell::new(1)));
+        collection.register_shared(|| Arc::new(AtomicI32::new(1)));
 
         let result = collection.build_factory().map(|factory| {
             let first_factory = factory.build(());
-            let first = first_factory.get::<Registered<Arc<RefCell<i32>>>>().unwrap();
-            assert_eq!(1, first.replace(2));
+            let first = first_factory.get::<Registered<Arc<AtomicI32>>>().unwrap();
+            assert_eq!(1, first.fetch_add(1, Ordering::Relaxed));
 
-            let first = first_factory.get::<Registered<Arc<RefCell<i32>>>>().unwrap();
+            let first = first_factory.get::<Registered<Arc<AtomicI32>>>().unwrap();
 
             let second = factory
                 .build(())
-                .get::<Registered<Arc<RefCell<i32>>>>()
+                .get::<Registered<Arc<AtomicI32>>>()
                 .unwrap();
 
-            (first.take(), second.take())
+            (first.load(Ordering::Relaxed), second.load(Ordering::Relaxed))
         });
 
         assert_eq!(Ok((2, 1)), result);
