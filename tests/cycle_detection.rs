@@ -1,4 +1,4 @@
-use ioc_rs::{self, BuildError, Registered, AllRegistered, ServiceCollection};
+use ioc_rs::{self, AllRegistered, BuildError, Registered, ServiceCollection};
 
 #[test]
 fn handle_cyclic_refernces() {

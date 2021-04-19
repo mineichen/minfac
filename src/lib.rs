@@ -90,7 +90,7 @@ impl ServiceProducer {
         Self::new_with_type(factory, TypeId::of::<Registered<T>>())
     }
     fn new_with_type(factory: UntypedFnFactory, type_id: TypeId) -> Self {
-        Self { factory, type_id }
+        Self { type_id, factory }
     }
 }
 // type CycleChecker = fn() -> Option<BuildError>;
@@ -102,7 +102,7 @@ struct UntypedFnFactoryContext<'a> {
     state_counter: &'a mut usize,
     final_ordered_types: &'a Vec<TypeId>,
     cyclic_reference_candidates:
-        &'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>,
+        &'a mut BTreeMap<usize, CycleCheckerValue>,
 }
 
 impl<'a> UntypedFnFactoryContext<'a> {
@@ -118,7 +118,7 @@ impl<'a> UntypedFnFactoryContext<'a> {
     ) {
         self.cyclic_reference_candidates.insert(
             self.service_descriptor_pos,
-            (false, type_name, dependencies),
+            CycleCheckerValue { is_visited: false, type_description: type_name, iter: dependencies},
         );
     }
 }
@@ -239,13 +239,13 @@ impl ServiceCollection {
                     indices
                         .into_iter()
                         .skip(1)
-                        .map(|i| cyclic_reference_candidates.get(&i).unwrap().1)
+                        .map(|i| cyclic_reference_candidates.get(&i).unwrap().type_description)
                         .fold(
                             cyclic_reference_candidates
                                 .values()
                                 .next()
                                 .unwrap()
-                                .1
+                                .type_description
                                 .to_string(),
                             |acc, n| acc + " -> " + n,
                         ),
@@ -256,8 +256,13 @@ impl ServiceCollection {
     }
 }
 
+struct CycleCheckerValue {
+    is_visited: bool,
+    type_description: &'static str,
+    iter: Box<dyn Iterator<Item = usize>>
+}
 struct CycleChecker<'a>(
-    &'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>,
+    &'a mut BTreeMap<usize, CycleCheckerValue>,
 );
 
 impl<'a> CycleChecker<'a> {
@@ -266,12 +271,12 @@ impl<'a> CycleChecker<'a> {
         while let Some((pos, _)) = self.0.iter().next() {
             stack.push(*pos);
             while let Some(current) = stack.last() {
-                if let Some((visited_already, _, iter)) = self.0.get_mut(current) {
-                    if *visited_already {
+                if let Some(value) = self.0.get_mut(current) {
+                    if value.is_visited {
                         return Err(stack);
                     }
-                    *visited_already = true;
-                    match iter.next() {
+                    value.is_visited = true;
+                    match value.iter.next() {
                         Some(x) => {
                             stack.push(x);
                             continue;
@@ -284,7 +289,7 @@ impl<'a> CycleChecker<'a> {
                 stack.pop();
                 if let Some(parent) = stack.last() {
                     let state = self.0.get_mut(parent).unwrap();
-                    state.0 = false;
+                    state.is_visited = false;
                 }
             }
         }

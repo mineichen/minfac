@@ -27,8 +27,8 @@ pub trait Resolvable: Any {
         key: &Self::PrecheckResult,
     ) -> Self::ItemPreChecked;
 
-    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError>;
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter;
+    fn precheck(ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError>;
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter;
 }
 
 impl Resolvable for () {
@@ -40,11 +40,11 @@ impl Resolvable for () {
     fn resolve(_: &ServiceProvider) -> Self::Item {}
     fn resolve_prechecked(_: &ServiceProvider, _: &Self::PrecheckResult) -> Self::ItemPreChecked {}
 
-    fn precheck(_ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(_ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         Ok(())
     }
 
-    fn iter_positions(_: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(_: &[TypeId]) -> Self::TypeIdsIter {
         core::iter::empty()
     }
 }
@@ -69,13 +69,13 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
         )
     }
 
-    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         Ok((r0, r1))
     }
 
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         T0::iter_positions(types).chain(T1::iter_positions(types))
     }
 }
@@ -105,14 +105,14 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
         )
     }
 
-    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         let r2 = T2::precheck(ordered_types)?;
         Ok((r0, r1, r2))
     }
 
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         T0::iter_positions(types)
             .chain(T1::iter_positions(types))
             .chain(T2::iter_positions(types))
@@ -134,6 +134,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         T2::PrecheckResult,
         T3::PrecheckResult,
     );
+    #[allow(clippy::type_complexity)]
     type TypeIdsIter =
         Chain<Chain<Chain<T0::TypeIdsIter, T1::TypeIdsIter>, T2::TypeIdsIter>, T3::TypeIdsIter>;
 
@@ -157,7 +158,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         )
     }
 
-    fn precheck(ordered_types: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         let r2 = T2::precheck(ordered_types)?;
@@ -165,7 +166,7 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
         Ok((r0, r1, r2, r3))
     }
 
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         T0::iter_positions(types)
             .chain(T1::iter_positions(types))
             .chain(T2::iter_positions(types))
@@ -189,18 +190,18 @@ impl Resolvable for ServiceProvider {
         provider.clone()
     }
 
-    fn precheck(_: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(_: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         Ok(())
     }
 
-    fn iter_positions(_types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(_types: &[TypeId]) -> Self::TypeIdsIter {
         core::iter::empty()
     }
 }
 
 /// pos must be a valid index in provider.producers
-unsafe fn resolve_unchecked<'a, T: resolvable::Resolvable>(
-    provider: &'a ServiceProvider,
+unsafe fn resolve_unchecked<T: resolvable::Resolvable>(
+    provider: &ServiceProvider,
     pos: usize,
 ) -> T::ItemPreChecked {
     ({
@@ -288,11 +289,11 @@ impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
         Self::resolve(container)
     }
 
-    fn precheck(_: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
+    fn precheck(_: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         Ok(())
     }
 
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         let first =
             binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| {
                 &f
@@ -337,13 +338,13 @@ impl<T: Any> resolvable::Resolvable for Registered<T> {
         unsafe { resolve_unchecked::<Self>(container, *index) }
     }
 
-    fn precheck(producers: &Vec<TypeId>) -> Result<Self::PrecheckResult, BuildError> {
-        binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f).ok_or(
-            BuildError::MissingDependency(super::MissingDependencyType::new::<Self>()),
+    fn precheck(producers: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
+        binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f).ok_or_else(
+            || BuildError::MissingDependency(super::MissingDependencyType::new::<Self>()),
         )
     }
 
-    fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
+    fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         let position = binary_search::binary_search_last_by_key(
             types,
             &TypeId::of::<Self>(),
