@@ -1,42 +1,29 @@
 //! # IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 //!
-//! Complete example:
+//! Simple example:
 //! ```
-//! use {
-//!     ioc_rs::{ServiceCollection, ServiceProvider, Dynamic, DynamicServices},
-//!     std::sync::Arc
-//! };
-//! let mut collection = ioc_rs::ServiceCollection::new();
+//! use { ioc_rs::{Dynamic, ServiceCollection}};
 //!
+//! let mut collection = ServiceCollection::new();
 //! collection
-//!     .with::<Dynamic<i16>>()
-//!     .register(|i| i as i32 * 2);
-//! collection
-//!     .with::<(ServiceProvider, DynamicServices<Arc<i8>>, Dynamic<i32>)>()
-//!     .register(|(provider, bytes, int)| {
-//!         provider.get::<Dynamic<i16>>().map(|i| i as i64).unwrap_or(1000) // Optional Dependency, fallback not used
-//!         + provider.get::<Dynamic<i128>>().map(|i| i as i64).unwrap_or(2000) // Optional Dependency, fallback
-//!         + bytes.map(|i| { *i as i64 }).sum::<i64>()
-//!         + int as i64 });
-//! collection.register_arc(|| Arc::new(1i8));
-//! collection.register_arc(|| Arc::new(2i8));
-//! collection.register_arc(|| Arc::new(3i8));
-//! collection.register(|| 4i16);
-//!
-//! let provider = collection.build().expect("All dependencies should be resolvable");
-//! assert_eq!(Some(Arc::new(3)), provider.get::<Dynamic<Arc<i8>>>()); // Last registered i8
-//! assert_eq!(Some(4+2000+(1+2+3)+(2*4)), provider.get::<Dynamic<i64>>()); // composed i64
+//!     .with::<Dynamic<u8>>()
+//!     .register(|byte| byte as i16 * 2);
+//! collection.register(|| 1u8);
+//! let provider = collection.build().expect("Configuration is valid");
+//! assert_eq!(Some(2), provider.get::<Dynamic<i16>>());
 //! ```
 //! # Features
 //! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 //! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
 //! - No redundant reference counting. Transient Services are retrieved as `T`, SharedServices as `Arc<T>`
 //! - Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an iterator over all registered i32
-//! - Fail fast. When building a `ServiceProvider`, all dependencies of registered services have to be resolvable.
+//! - Fail fast. When building a `ServiceProvider` all registered services are checked to
+//!   - have all dependencies resolvable
+//!   - contain no dependency-cycles
 //! - Common pitfalls of traditional IOC are prevented by design
-//!   - Shared services cannot reference scoped services (see examples/scoped_services.rs)
+//!   - Singleton services cannot reference scoped services (see examples/scoped_services.rs)
 //!   - Shared services cannot outlive their `ServiceProvider`
-//! - #[no_std]
+//! - `#[no_std]`
 //!
 //! Visit the documentation for more details
 
@@ -45,7 +32,14 @@
 extern crate alloc;
 
 use {
-    alloc::{boxed::Box, collections::BTreeMap,string::{String, ToString}, sync::Arc, vec, vec::Vec},
+    alloc::{
+        boxed::Box,
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::Arc,
+        vec,
+        vec::Vec,
+    },
     core::{
         any::{type_name, Any, TypeId},
         fmt::Debug,
@@ -233,24 +227,33 @@ impl ServiceCollection {
             producers.push(producer);
         }
 
-        CycleChecker(&mut cyclic_reference_candidates).ok().map_err(|indices| {
-            BuildError::CyclicDependency(
-                indices.into_iter()
-                    .skip(1)
-                    .map(|i| cyclic_reference_candidates.get(&i).unwrap().1)
-                    .fold(
-                        cyclic_reference_candidates.values().next().unwrap().1.to_string(),
-                        |acc, n| acc + " -> " + n
-                    )
+        CycleChecker(&mut cyclic_reference_candidates)
+            .ok()
+            .map_err(|indices| {
+                BuildError::CyclicDependency(
+                    indices
+                        .into_iter()
+                        .skip(1)
+                        .map(|i| cyclic_reference_candidates.get(&i).unwrap().1)
+                        .fold(
+                            cyclic_reference_candidates
+                                .values()
+                                .next()
+                                .unwrap()
+                                .1
+                                .to_string(),
+                            |acc, n| acc + " -> " + n,
+                        ),
                 )
             })?;
-        
 
         Ok(producers)
     }
 }
 
-struct CycleChecker<'a>(&'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>);
+struct CycleChecker<'a>(
+    &'a mut BTreeMap<usize, (bool, &'static str, Box<dyn Iterator<Item = usize>>)>,
+);
 
 impl<'a> CycleChecker<'a> {
     fn ok(self) -> Result<(), Vec<usize>> {
@@ -258,8 +261,7 @@ impl<'a> CycleChecker<'a> {
         while let Some((pos, _)) = self.0.iter().next() {
             stack.push(*pos);
             while let Some(current) = stack.last() {
-                if let Some((visited_already, _, iter)) = self.0.get_mut(current)
-                {
+                if let Some((visited_already, _, iter)) = self.0.get_mut(current) {
                     if *visited_already {
                         return Err(stack);
                     }
@@ -314,9 +316,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
                 core::any::type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(
-                    ctx.final_ordered_types,
-                ))
+                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |container: &ServiceProvider| {
@@ -335,9 +335,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
                 core::any::type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(
-                    ctx.final_ordered_types,
-                ))
+                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
             let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
                 Box::new(move |provider: &ServiceProvider| {
@@ -458,14 +456,7 @@ mod tests {
             "Dynamic", "String",
         ]);
     }
-    #[test]
-    fn bla() {
-        let mut map = alloc::collections::BTreeMap::<i32, Box<dyn Iterator<Item = i32>>>::new();
-        map.insert(1, Box::new(vec![2, 2].into_iter()));
-        let first = map.get_mut(&1).unwrap().next().unwrap();
-        let second = map.get_mut(&1).unwrap().next().unwrap();
-        assert_eq!(4, first + second);
-    }
+
     #[test]
     fn build_with_missing_tuple3_dep_fails() {
         build_with_missing_dependency_fails::<(Dynamic<String>, Dynamic<i32>, Dynamic<i32>)>(&[
