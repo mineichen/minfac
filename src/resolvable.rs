@@ -262,16 +262,16 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
     }
 }
 
-impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
-    type Item = ServiceIterator<Dynamic<T>>;
-    type ItemPreChecked = ServiceIterator<Dynamic<T>>;
+impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
+    type Item = ServiceIterator<Registered<T>>;
+    type ItemPreChecked = ServiceIterator<Registered<T>>;
     type PrecheckResult = ();
     type TypeIdsIter = core::ops::Range<usize>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_first_by_key(
             &provider.immutable_state.producers,
-            &TypeId::of::<Dynamic<T>>(),
+            &TypeId::of::<Registered<T>>(),
             |f| &f.get_result_type_id(),
         );
         ServiceIterator {
@@ -294,13 +294,13 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
 
     fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
         let first =
-            binary_search::binary_search_first_by_key(types, &TypeId::of::<Dynamic<T>>(), |f| &f);
+            binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| &f);
 
         match first {
             Some(x) => {
                 let to = binary_search::binary_search_last_by_key(
                     &types[x..],
-                    &TypeId::of::<Dynamic<T>>(),
+                    &TypeId::of::<Registered<T>>(),
                     |f| &f,
                 )
                 .unwrap()
@@ -313,7 +313,7 @@ impl<T: Any> resolvable::Resolvable for DynamicServices<T> {
     }
 }
 
-impl<T: Any> resolvable::Resolvable for Dynamic<T> {
+impl<T: Any> resolvable::Resolvable for Registered<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
     type PrecheckResult = usize;
@@ -357,14 +357,14 @@ mod tests {
     #[test]
     fn resolvable_services_iterate_services_test() {
         let mut types = vec![
-            TypeId::of::<Dynamic<i32>>(),
-            TypeId::of::<Dynamic<i32>>(),
-            TypeId::of::<Dynamic<i64>>(),
+            TypeId::of::<Registered<i32>>(),
+            TypeId::of::<Registered<i32>>(),
+            TypeId::of::<Registered<i64>>(),
         ];
         types.sort();
 
-        assert_eq!(2, DynamicServices::<i32>::iter_positions(&types).count());
-        assert_eq!(1, DynamicServices::<i64>::iter_positions(&types).count());
-        assert_eq!(0, DynamicServices::<i128>::iter_positions(&types).count());
+        assert_eq!(2, AllRegistered::<i32>::iter_positions(&types).count());
+        assert_eq!(1, AllRegistered::<i64>::iter_positions(&types).count());
+        assert_eq!(0, AllRegistered::<i128>::iter_positions(&types).count());
     }
 }

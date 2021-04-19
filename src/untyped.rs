@@ -1,5 +1,5 @@
 use {
-    crate::{Dynamic, ServiceProvider},
+    crate::{Registered, ServiceProvider},
     alloc::boxed::Box,
     core::any::{Any, TypeId},
 };
@@ -18,7 +18,7 @@ impl UntypedFn {
 
     // Unsafe constraint: Must be called with the same T as it was created
     pub unsafe fn borrow_for<T: Any>(&self) -> &dyn Fn(&ServiceProvider) -> T {
-        debug_assert_eq!(TypeId::of::<Dynamic<T>>(), self.result_type_id);
+        debug_assert_eq!(TypeId::of::<Registered<T>>(), self.result_type_id);
         &*(self.pointer as *const dyn Fn(&ServiceProvider) -> T)
     }
 
@@ -36,7 +36,7 @@ where
 {
     fn from(factory: Box<dyn Fn(&ServiceProvider) -> T>) -> Self {
         UntypedFn {
-            result_type_id: core::any::TypeId::of::<Dynamic<T>>(),
+            result_type_id: core::any::TypeId::of::<Registered<T>>(),
             pointer: Box::into_raw(factory) as *mut dyn Fn(),
             wrapper_creator: |inner, provider| {
                 let factory: Box<dyn Fn(&ServiceProvider) -> T> =

@@ -105,7 +105,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
 mod tests {
     use {
         super::*,
-        crate::{BuildError, Dynamic, DynamicServices},
+        crate::{BuildError, Registered, AllRegistered},
         core::cell::RefCell,
     };
 
@@ -122,30 +122,30 @@ mod tests {
         let mut child_provider = ServiceCollection::new();
         child_provider.register(|| 1);
         let child_factory = child_provider.with_parent(parent).build::<i32>().unwrap();
-        let iterator = child_factory.build(2).get::<DynamicServices<i32>>();
+        let iterator = child_factory.build(2).get::<AllRegistered<i32>>();
         assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
 
     #[test]
     fn uses_same_parent_arc_for_two_providers_from_the_same_child_factory() {
         let mut parent_provider = ServiceCollection::new();
-        parent_provider.register_arc(|| Arc::new(RefCell::new(42)));
+        parent_provider.register_shared(|| Arc::new(RefCell::new(42)));
         let parent = parent_provider
             .build()
             .expect("Building parent failed unexpectedly");
 
         let mut child_provider = ServiceCollection::new();
         child_provider
-            .with::<Dynamic<Arc<RefCell<i32>>>>()
+            .with::<Registered<Arc<RefCell<i32>>>>()
             .register(|i| Box::new(i));
         let child_factory = child_provider.with_parent(parent).build::<i64>().unwrap();
         let child1 = child_factory
             .build(1)
-            .get::<Dynamic<Box<Arc<RefCell<i32>>>>>()
+            .get::<Registered<Box<Arc<RefCell<i32>>>>>()
             .unwrap();
         let child2 = child_factory
             .build(2)
-            .get::<Dynamic<Arc<RefCell<i32>>>>()
+            .get::<Registered<Arc<RefCell<i32>>>>()
             .unwrap();
         *child1.borrow_mut() = 43;
         assert_eq!(43, *child2.borrow_mut());
@@ -155,12 +155,12 @@ mod tests {
     fn arcs_with_dependencies_are_not_shared_between_two_provider_produced_by_the_same_factory() {
         let mut collection = ServiceCollection::new();
         collection
-            .with::<Dynamic<i32>>()
-            .register_arc(|s| Arc::new(s as i64));
+            .with::<Registered<i32>>()
+            .register_shared(|s| Arc::new(s as i64));
         let result = collection.build_factory().map(|factory| {
             (
-                factory.build(1).get::<Dynamic<Arc<i64>>>(),
-                factory.build(2).get::<Dynamic<Arc<i64>>>(),
+                factory.build(1).get::<Registered<Arc<i64>>>(),
+                factory.build(2).get::<Registered<Arc<i64>>>(),
             )
         });
 
@@ -171,18 +171,18 @@ mod tests {
     fn arcs_without_dependencies_are_not_shared_between_two_provider_produced_by_the_same_factory()
     {
         let mut collection = ServiceCollection::new();
-        collection.register_arc(|| Arc::new(RefCell::new(1)));
+        collection.register_shared(|| Arc::new(RefCell::new(1)));
 
         let result = collection.build_factory().map(|factory| {
             let first_factory = factory.build(());
-            let first = first_factory.get::<Dynamic<Arc<RefCell<i32>>>>().unwrap();
+            let first = first_factory.get::<Registered<Arc<RefCell<i32>>>>().unwrap();
             assert_eq!(1, first.replace(2));
 
-            let first = first_factory.get::<Dynamic<Arc<RefCell<i32>>>>().unwrap();
+            let first = first_factory.get::<Registered<Arc<RefCell<i32>>>>().unwrap();
 
             let second = factory
                 .build(())
-                .get::<Dynamic<Arc<RefCell<i32>>>>()
+                .get::<Registered<Arc<RefCell<i32>>>>()
                 .unwrap();
 
             (first.take(), second.take())
@@ -194,23 +194,23 @@ mod tests {
     #[test]
     fn create_provider_with_factory() {
         let mut collection = ServiceCollection::new();
-        collection.with::<Dynamic<i32>>().register(|s| s as i64);
+        collection.with::<Registered<i32>>().register(|s| s as i64);
         let result = collection
             .build_factory()
-            .map(|factory| factory.build(42).get::<Dynamic<i64>>());
+            .map(|factory| factory.build(42).get::<Registered<i64>>());
         assert_eq!(Ok(Some(42i64)), result);
     }
 
     #[test]
     fn create_provider_with_factory_fails_for_missing_dependency() {
         let mut collection = ServiceCollection::new();
-        collection.with::<Dynamic<i32>>().register(|s| s as i64);
+        collection.with::<Registered<i32>>().register(|s| s as i64);
         if let Err(BuildError::MissingDependency(infos)) = collection.build_factory::<u32>() {
             assert_eq!(
                 infos,
                 crate::MissingDependencyType {
-                    id: core::any::TypeId::of::<Dynamic<i32>>(),
-                    name: "ioc_rs::Dynamic<i32>"
+                    id: core::any::TypeId::of::<Registered<i32>>(),
+                    name: "ioc_rs::Registered<i32>"
                 }
             );
         } else {

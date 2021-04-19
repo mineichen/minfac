@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use {std::sync::Arc, ioc_rs::{Registered,ServiceCollection}};
 struct PluginService;
 
 impl interface::Service for PluginService {
@@ -9,10 +9,10 @@ impl interface::Service for PluginService {
 }
 
 #[no_mangle]
-pub fn register(container: &mut ioc_rs::ServiceCollection) {
+pub fn register(container: &mut ServiceCollection) {
     println!("plugin: Register Service");
-    container.register_arc(|| Arc::new(PluginService) as Arc<dyn interface::Service>);
+    container.register_shared(|| Arc::new(PluginService) as Arc<dyn interface::Service>);
     container
-        .with::<ioc_rs::Dynamic<i32>>()
+        .with::<Registered<i32>>()
         .register(|i| i as i64 * 3);
 }
