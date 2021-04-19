@@ -26,7 +26,11 @@
 //!   - Shared services cannot outlive their `ServiceProvider`
 //! - `#[no_std]`
 //!
-//! Visit the documentation for more details
+//! Visit the examples/documentation for more details
+//! 
+//! This library requires some amounts of unsafe code. All tests are executed with `cargo miri test`
+//! to reduce the chance of having undefined behavior or memory leaks. Audits from experienced developers
+//! would be appreciated.
 
 #![no_std]
 
