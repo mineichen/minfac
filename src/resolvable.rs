@@ -294,7 +294,9 @@ impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
 
     fn iter_positions(types: &Vec<TypeId>) -> Self::TypeIdsIter {
         let first =
-            binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| &f);
+            binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| {
+                &f
+            });
 
         match first {
             Some(x) => {

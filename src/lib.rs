@@ -1,6 +1,6 @@
 //! # IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 //!
-//! Simple example with two services, one of which depends on the other. 
+//! Simple example with two services, one of which depends on the other.
 //! ```
 //! use {ioc_rs::{Registered, ServiceCollection}};
 //!
@@ -27,7 +27,7 @@
 //! - `#[no_std]`
 //!
 //! Visit the examples/documentation for more details
-//! 
+//!
 //! This library requires some amounts of unsafe code. All tests are executed with `cargo miri test`
 //! to reduce the chance of having undefined behavior or memory leaks. Audits from experienced developers
 //! would be appreciated.
@@ -334,7 +334,10 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
     }
-    pub fn register_shared<T: Any + ?Sized + Send + Sync>(&mut self, creator: fn(TDep::ItemPreChecked) -> Arc<T>) {
+    pub fn register_shared<T: Any + ?Sized + Send + Sync>(
+        &mut self,
+        creator: fn(TDep::ItemPreChecked) -> Arc<T>,
+    ) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
             let key = TDep::precheck(ctx.final_ordered_types)?;
@@ -413,7 +416,10 @@ struct ServiceProviderImmutableState {
 #[cfg(test)]
 mod tests {
 
-    use {super::*, alloc::rc::Rc, core::sync::atomic::{AtomicI32, Ordering}};
+    use {
+        super::*,
+        core::sync::atomic::{AtomicI32, Ordering},
+    };
 
     #[test]
     fn resolve_last_transient() {
@@ -458,15 +464,16 @@ mod tests {
     #[test]
     fn build_with_missing_tuple2_dep_fails() {
         build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>)>(&[
-            "Registered", "String",
+            "Registered",
+            "String",
         ]);
     }
 
     #[test]
     fn build_with_missing_tuple3_dep_fails() {
-        build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>, Registered<i32>)>(&[
-            "Registered", "String",
-        ]);
+        build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>, Registered<i32>)>(
+            &["Registered", "String"],
+        );
     }
     #[test]
     fn build_with_missing_tuple4_dep_fails() {
@@ -609,7 +616,10 @@ mod tests {
             .expect("Expected to have all dependencies");
         assert_eq!(
             provider.get::<Registered::<i32>>().unwrap(),
-            provider.get::<Registered::<Arc<i32>>>().map(|f| *f).unwrap()
+            provider
+                .get::<Registered::<Arc<i32>>>()
+                .map(|f| *f)
+                .unwrap()
         );
     }
 

@@ -1,4 +1,7 @@
-use {std::sync::Arc, ioc_rs::{Registered,ServiceCollection}};
+use {
+    ioc_rs::{Registered, ServiceCollection},
+    std::sync::Arc,
+};
 struct PluginService;
 
 impl interface::Service for PluginService {

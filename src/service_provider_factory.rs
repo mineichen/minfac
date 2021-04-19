@@ -105,7 +105,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
 mod tests {
     use {
         super::*,
-        crate::{BuildError, Registered, AllRegistered},
+        crate::{AllRegistered, BuildError, Registered},
         core::sync::atomic::{AtomicI32, Ordering},
     };
 
@@ -185,7 +185,10 @@ mod tests {
                 .get::<Registered<Arc<AtomicI32>>>()
                 .unwrap();
 
-            (first.load(Ordering::Relaxed), second.load(Ordering::Relaxed))
+            (
+                first.load(Ordering::Relaxed),
+                second.load(Ordering::Relaxed),
+            )
         });
 
         assert_eq!(Ok((2, 1)), result);

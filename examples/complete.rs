@@ -2,7 +2,7 @@
 //! If you can understand all assertions, you've seen all aspects of this library
 
 use {
-    ioc_rs::{Registered, AllRegistered, ServiceCollection, ServiceProvider},
+    ioc_rs::{AllRegistered, Registered, ServiceCollection, ServiceProvider},
     std::sync::Arc,
 };
 
