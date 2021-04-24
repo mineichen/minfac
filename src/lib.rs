@@ -1,4 +1,5 @@
-//! # IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
+//! # Lightweight Inversion of control
+//! IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 //!
 //! Simple example with two services, one of which depends on the other.
 //! ```
@@ -123,15 +124,6 @@ impl<'a> UntypedFnFactoryContext<'a> {
     }
 }
 
-impl ServiceCollection {
-    /// Creates an empty ServiceCollection
-    pub fn new() -> Self {
-        Self {
-            producer_factories: Vec::new(),
-        }
-    }
-}
-
 impl Default for ServiceCollection {
     fn default() -> Self {
         Self::new()
@@ -139,6 +131,13 @@ impl Default for ServiceCollection {
 }
 
 impl ServiceCollection {
+    /// Creates an empty ServiceCollection
+    pub fn new() -> Self {
+        Self {
+            producer_factories: Vec::new(),
+        }
+    }
+
     /// Generate a ServiceBuilder with `T` as a dependency.
     pub fn with<T: Resolvable>(&mut self) -> ServiceBuilder<'_, T> {
         ServiceBuilder(self, PhantomData)
@@ -188,6 +187,7 @@ impl ServiceCollection {
         Ok(ServiceProvider {
             immutable_state,
             service_states: Arc::new(service_states),
+            is_root: true
         })
     }
 
@@ -202,8 +202,8 @@ impl ServiceCollection {
         ServiceProviderFactory::create(self, Vec::new())
     }
 
-    pub fn with_parent(self, provider: ServiceProvider) -> ServiceProviderFactoryBuilder {
-        ServiceProviderFactoryBuilder::create(self, provider)
+    pub fn with_parent(self, provider: &ServiceProvider) -> ServiceProviderFactoryBuilder {
+        ServiceProviderFactoryBuilder::create(self, provider.clone())
     }
 
     fn validate_producers(
@@ -372,6 +372,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 pub struct ServiceProvider {
     immutable_state: Arc<ServiceProviderImmutableState>,
     service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
+    is_root: bool
 }
 
 impl Debug for ServiceProvider {
@@ -384,10 +385,32 @@ impl Debug for ServiceProvider {
     }
 }
 
+impl Drop for ServiceProvider {
+    fn drop(&mut self) {
+        if !self.is_root {
+            return;
+        }
+
+        let count = Arc::strong_count(&self.service_states);
+        if count > 1 {
+            panic!("Original ServiceProvider was dropped while still beeing used {} times", count - 1);
+        }
+    }
+}
+
 impl ServiceProvider {
     pub fn get<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
     }
+
+    fn clone(&self) -> Self {
+        Self {
+            immutable_state: self.immutable_state.clone(),
+            service_states: self.service_states.clone(),
+            is_root: false
+        }
+    }
+
     fn get_or_initialize_pos<T: Clone + Any, TFn: Fn() -> T>(
         &self,
         index: usize,
@@ -400,15 +423,6 @@ impl ServiceProvider {
             .get_or_init(|| UntypedPointer::new(initializer()));
 
         unsafe { pointer.borrow_as::<T>() }.clone()
-    }
-}
-
-impl Clone for ServiceProvider {
-    fn clone(&self) -> Self {
-        Self {
-            immutable_state: self.immutable_state.clone(),
-            service_states: self.service_states.clone(),
-        }
     }
 }
 

@@ -26,7 +26,7 @@ impl ServiceProviderFactoryBuilder {
     pub fn create(collection: ServiceCollection, first_parent: ServiceProvider) -> Self {
         Self {
             collection,
-            providers: alloc::vec!(first_parent),
+            providers: alloc::vec!(first_parent)
         }
     }
     pub fn build<T: Any + Clone>(self) -> Result<ServiceProviderFactory<T>, super::BuildError> {
@@ -97,6 +97,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
         ServiceProvider {
             service_states: Arc::new(service_states),
             immutable_state: self.immutable_state.clone(),
+            is_root: true
         }
     }
 }
@@ -112,17 +113,24 @@ mod tests {
     // todo: Test dropping ServiceProviderFactory doesn't try to free uninitialized
 
     #[test]
+    fn servicefactory_drops_safely() {
+   
+    }
+
+    #[test]
     fn services_are_returned_in_correct_order() {
-        let mut parent_provider = ServiceCollection::new();
-        parent_provider.register(|| 0);
-        let parent = parent_provider
+        let mut parent_collection = ServiceCollection::new();
+        parent_collection.register(|| 0);
+        let parent_provider = parent_collection
             .build()
             .expect("Building parent failed unexpectedly");
 
-        let mut child_provider = ServiceCollection::new();
-        child_provider.register(|| 1);
-        let child_factory = child_provider.with_parent(parent).build::<i32>().unwrap();
-        let iterator = child_factory.build(2).get::<AllRegistered<i32>>();
+        let mut child_collection = ServiceCollection::new();
+        child_collection.register(|| 1);
+        let child_factory = child_collection.with_parent(&parent_provider).build::<i32>().unwrap();
+        let child_provider = child_factory.build(2);
+        let iterator = child_provider.get::<AllRegistered<i32>>();
+
         assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
 
@@ -138,17 +146,17 @@ mod tests {
         child_provider
             .with::<Registered<Arc<AtomicI32>>>()
             .register(|i| Box::new(i));
-        let child_factory = child_provider.with_parent(parent).build::<i64>().unwrap();
-        let child1 = child_factory
+        let child_factory = child_provider.with_parent(&parent).build::<i64>().unwrap();
+        let child1_value = child_factory
             .build(1)
             .get::<Registered<Box<Arc<AtomicI32>>>>()
             .unwrap();
-        let child2 = child_factory
+        let child2_value = child_factory
             .build(2)
             .get::<Registered<Arc<AtomicI32>>>()
             .unwrap();
-        child1.fetch_add(1, Ordering::Relaxed);
-        assert_eq!(43, child2.load(Ordering::Relaxed));
+        child1_value.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(43, child2_value.load(Ordering::Relaxed));
     }
 
     #[test]

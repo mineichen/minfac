@@ -181,11 +181,11 @@ impl Resolvable for ServiceProvider {
     type PrecheckResult = ();
     type TypeIdsIter = Empty<usize>;
 
-    fn resolve(_container: &ServiceProvider) -> Self::Item {}
+    fn resolve(_provider: &ServiceProvider) -> Self::Item {}
 
     fn resolve_prechecked(
         provider: &ServiceProvider,
-        _: &Self::PrecheckResult,
+        _: &(),
     ) -> Self::ItemPreChecked {
         provider.clone()
     }
