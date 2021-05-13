@@ -1,7 +1,7 @@
 use {
     crate::{Registered, ServiceProvider},
-    alloc::boxed::Box,
-    core::any::{Any, TypeId},
+    alloc::{boxed::Box, sync::Arc},
+    core::any::{type_name, Any, TypeId},
 };
 
 #[derive(Clone)]
@@ -53,26 +53,64 @@ impl Drop for UntypedFn {
     }
 }
 
+type UntypedPointerChecker = Option<Box<dyn Fn() -> DanglingCheckerResult>>;
 #[derive(Clone)]
 pub struct UntypedPointer {
     #[cfg(debug_assertions)]
     debug_type: TypeId,
     pointer: *mut (),
     destroyer: fn(*mut ()),
+    checker: fn(*mut ()) -> UntypedPointerChecker,
 }
 
+pub struct DanglingCheckerResult {
+    pub remaining_references: usize,
+    pub typename: &'static str,
+}
+
+impl core::fmt::Debug for DanglingCheckerResult {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Type: {} (remaining {})",
+            self.typename, self.remaining_references
+        )
+    }
+}
+
+/// We need this structure, because at the time of writing (13.05.21),
+/// Arc<dyn Any>::downcast<T> doesn't support T: ?Sized
 impl UntypedPointer {
-    pub fn new<T: Any>(data: T) -> Self {
+    pub fn new<T: Any + ?Sized>(data: Arc<T>) -> Self {
         Self {
             #[cfg(debug_assertions)]
-            debug_type: TypeId::of::<T>(),
+            debug_type: TypeId::of::<Arc<T>>(),
             pointer: Box::into_raw(Box::new(data)) as *mut (),
-            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut T)) },
+            destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
+            checker: |x| {
+                let arc_ref: &Arc<T> = unsafe { &*(x as *mut Arc<T>) };
+                let count = Arc::strong_count(arc_ref);
+                if count > 1 {
+                    let weak = Arc::downgrade(arc_ref);
+                    Some(Box::new(move || DanglingCheckerResult {
+                        remaining_references: weak.strong_count(),
+                        typename: type_name::<T>(),
+                    }))
+                } else {
+                    None
+                }
+            },
         }
     }
 
-    pub unsafe fn borrow_as<T>(&self) -> &T {
-        &*(self.pointer as *mut T)
+    pub unsafe fn clone_as<T: Clone>(&self) -> T {
+        T::clone(&*(self.pointer as *mut T))
+    }
+    /// Returns a lambda which can be called even after the UntypedPointer is destroyed
+    /// The checker is just created, if the strong_count > 1. Because this method is used in the desturctor of ServiceProvider,
+    /// the pointer which is causing > 1 is held by the ServiceProvider itself.
+    pub fn get_weak_checker_if_dangling(&self) -> Option<Box<dyn Fn() -> DanglingCheckerResult>> {
+        (self.checker)(self.pointer)
     }
 }
 
@@ -83,6 +121,7 @@ impl Default for UntypedPointer {
             debug_type: TypeId::of::<()>(),
             pointer: core::ptr::null_mut(),
             destroyer: |_| {},
+            checker: |_| None,
         }
     }
 }

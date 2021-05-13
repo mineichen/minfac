@@ -1,7 +1,5 @@
 //! # Lightweight Inversion of control
 //! IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
-//!
-//! Simple example with two services, one of which depends on the other.
 //! ```
 //! use {ioc_rs::{Registered, ServiceCollection}};
 //!
@@ -17,14 +15,15 @@
 //! # Features
 //! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 //! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
-//! - No redundant reference counting. Transient Services are retrieved as `T`, SharedServices as `Arc<T>`
-//! - Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an iterator over all registered i32
+//! - No wasteful reference counting. Transient services are retrieved as `T`, SharedServices as `Arc<T>`
+//! - Inheritance (one ServiceProvider can inherit services from one or multiple parent ServiceProviders) to avoid concept of scoped services
+//! - Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an lazy iterator over all registered i32
 //! - Fail fast. When building a `ServiceProvider` all registered services are checked to
 //!   - have all dependencies
 //!   - contain no dependency-cycles
 //! - Common pitfalls of traditional IOC are prevented by design
 //!   - Singleton services cannot reference scoped services (see examples/complete.rs)
-//!   - Shared services cannot outlive their `ServiceProvider`
+//!   - Shared services cannot outlive their `ServiceProvider` (checked at runtime when debug_assertions are enabled)
 //! - `#[no_std]`
 //!
 //! Visit the examples/documentation for more details
@@ -32,9 +31,7 @@
 //! This library requires some amounts of unsafe code. All tests are executed with `cargo miri test`
 //! to reduce the chance of having undefined behavior or memory leaks. Audits from experienced developers
 //! would be appreciated.
-
-#![no_std]
-
+#![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
 use {
@@ -62,10 +59,31 @@ mod resolvable;
 mod service_provider_factory;
 mod untyped;
 
+/// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
+/// - WeakServiceProvider outlives the ServiceProvider its created from
+/// - ServiceIterator<T>, which owns a WeakServiceProvider internally, outlives its ServiceProvider
+/// - Any shared service outlives its ServiceProvider
+///
+/// Ignoring errors is strongly discouraged, but doesn't cause any undefined behavior or memory leaks by the framework.
+/// However, leaking context specific services often lead to memory leaks in user code which are difficult to find:
+/// All shared references of a ServiceProvider are kept alive if the result of a single serviceProvider::get::<AllRegistered<i32>>() call
+/// is leaking it's provider. This can easily happen, if you forget to collect the results into a vector.
+/// To prevent these sneaky errors, ServiceProvider::drop() ensures that none of it's internals are kept alive
+///
+/// Be aware, that this function could be called while panicking already. In std, panic!(), when the thread is panicking
+/// already, terminates the entire program immediately.
+#[cfg(debug_assertions)]
+pub static mut ERROR_HANDLER: fn(msg: &dyn core::fmt::Debug) = |msg| {
+    #[cfg(feature = "std")]
+    if !std::thread::panicking() {
+        panic!("{:?}", msg)
+    }
+};
+
 /// Type used to retrieve all instances of `T` of a `ServiceProvider`
 pub struct ServiceIterator<T> {
     next_pos: Option<usize>,
-    provider: ServiceProvider,
+    provider: WeakServiceProvider,
     item_type: PhantomData<T>,
 }
 
@@ -102,8 +120,7 @@ struct UntypedFnFactoryContext<'a> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
     final_ordered_types: &'a Vec<TypeId>,
-    cyclic_reference_candidates:
-        &'a mut BTreeMap<usize, CycleCheckerValue>,
+    cyclic_reference_candidates: &'a mut BTreeMap<usize, CycleCheckerValue>,
 }
 
 impl<'a> UntypedFnFactoryContext<'a> {
@@ -119,7 +136,11 @@ impl<'a> UntypedFnFactoryContext<'a> {
     ) {
         self.cyclic_reference_candidates.insert(
             self.service_descriptor_pos,
-            CycleCheckerValue { is_visited: false, type_description: type_name, iter: dependencies},
+            CycleCheckerValue {
+                is_visited: false,
+                type_description: type_name,
+                iter: dependencies,
+            },
         );
     }
 }
@@ -139,6 +160,29 @@ impl ServiceCollection {
     }
 
     /// Generate a ServiceBuilder with `T` as a dependency.
+    /// An instance of T is provided as an argument to the factory fn:
+    /// ``` rust
+    /// use {ioc_rs::{AllRegistered, Registered, ServiceCollection, ServiceIterator, WeakServiceProvider}};
+    ///
+    /// let mut collection = ServiceCollection::new();
+    ///
+    /// // No dependency
+    /// collection.register(|| 42u8);
+    /// // Single Dependency
+    /// collection.with::<Registered<u8>>().register(|i: u8| i as u16);
+    /// // All of a type
+    /// collection.with::<AllRegistered<u8>>().register(|i: ServiceIterator<Registered<u8>>| i.map(|i| i as u32).sum::<u32>());
+    /// // Multiple (max tupple size == 4)
+    /// collection.with::<(Registered<u8>, Registered<u16>)>().register(|(byte, short)| (byte as u64));
+    /// // Nested tuples for more than 4 Dependencies
+    /// collection.with::<((Registered<u8>, Registered<u16>), (Registered<u32>, Registered<u64>))>()
+    ///     .register(|((byte, short), (integer, long))| (byte as u128 + short as u128 + integer as u128 + long as u128));
+    /// // Inject WeakServiceProvider for optional dependencies or to pass it to a factory
+    /// collection.with::<WeakServiceProvider>().register(|s: WeakServiceProvider| s.get::<Registered<u16>>().unwrap() as u32);
+    ///
+    /// let provider = collection.build().expect("Dependencies are ok");
+    /// assert_eq!(Some(42 * 4), provider.get::<Registered<u128>>());
+    /// ```
     pub fn with<T: Resolvable>(&mut self) -> ServiceBuilder<'_, T> {
         ServiceBuilder(self, PhantomData)
     }
@@ -159,7 +203,7 @@ impl ServiceCollection {
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
-    /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent memory leaks.
+    /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent service leaking in std.
     pub fn register_shared<T: Any + ?Sized + Send + Sync>(&mut self, creator: fn() -> Arc<T>) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
@@ -177,17 +221,19 @@ impl ServiceCollection {
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
-        let mut service_states_count = 0;
-        let producers = self.validate_producers(Vec::new(), &mut service_states_count)?;
-        let service_states = vec![OnceCell::new(); service_states_count];
+        let (producers, service_states_count) = self.validate_producers(Vec::new())?;
+        let shared_services = vec![OnceCell::new(); service_states_count];
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
             _parents: Vec::new(),
         });
         Ok(ServiceProvider {
             immutable_state,
-            service_states: Arc::new(service_states),
-            is_root: true
+            service_states: Arc::new(ServiceProviderMutableState {
+                shared_services,
+                base: None,
+            }),
+            is_root: true,
         })
     }
 
@@ -203,14 +249,14 @@ impl ServiceCollection {
     }
 
     pub fn with_parent(self, provider: &ServiceProvider) -> ServiceProviderFactoryBuilder {
-        ServiceProviderFactoryBuilder::create(self, provider.clone())
+        ServiceProviderFactoryBuilder::create(self, provider.into())
     }
 
     fn validate_producers(
         self,
         mut factories: Vec<ServiceProducer>,
-        state_counter: &mut usize,
-    ) -> Result<Vec<UntypedFn>, BuildError> {
+    ) -> Result<(Vec<UntypedFn>, usize), BuildError> {
+        let mut state_counter: usize = 0;
         factories.extend(self.producer_factories.into_iter());
 
         factories.sort_by_key(|a| a.type_id);
@@ -222,7 +268,7 @@ impl ServiceCollection {
 
         for (i, x) in factories.into_iter().enumerate() {
             let mut ctx = UntypedFnFactoryContext {
-                state_counter,
+                state_counter: &mut state_counter,
                 final_ordered_types: &mut final_ordered_types,
                 cyclic_reference_candidates: &mut cyclic_reference_candidates,
                 service_descriptor_pos: i,
@@ -239,7 +285,12 @@ impl ServiceCollection {
                     indices
                         .into_iter()
                         .skip(1)
-                        .map(|i| cyclic_reference_candidates.get(&i).unwrap().type_description)
+                        .map(|i| {
+                            cyclic_reference_candidates
+                                .get(&i)
+                                .unwrap()
+                                .type_description
+                        })
                         .fold(
                             cyclic_reference_candidates
                                 .values()
@@ -252,18 +303,16 @@ impl ServiceCollection {
                 )
             })?;
 
-        Ok(producers)
+        Ok((producers, state_counter))
     }
 }
 
 struct CycleCheckerValue {
     is_visited: bool,
     type_description: &'static str,
-    iter: Box<dyn Iterator<Item = usize>>
+    iter: Box<dyn Iterator<Item = usize>>,
 }
-struct CycleChecker<'a>(
-    &'a mut BTreeMap<usize, CycleCheckerValue>,
-);
+struct CycleChecker<'a>(&'a mut BTreeMap<usize, CycleCheckerValue>);
 
 impl<'a> CycleChecker<'a> {
     fn ok(self) -> Result<(), Vec<usize>> {
@@ -329,8 +378,8 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
-                Box::new(move |container: &ServiceProvider| {
-                    let arg = TDep::resolve_prechecked(container, &key);
+                Box::new(move |provider: &ServiceProvider| {
+                    let arg = TDep::resolve_prechecked(provider, &key);
                     creator(arg)
                 });
             Ok(func.into())
@@ -367,12 +416,12 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
 /// to retrieve services by type. ServiceProviders are final and cannot be modified anymore. When a ServiceProvider goes
-/// out of scope, all of its clones and retrieve shared services have to be dropped too. Otherwise
-/// dropping the original ServiceProvider panics
+/// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
+/// dropping the original ServiceProvider results in a call to ioc-rs::ERROR_HANDLER, which panics by default in std.
 pub struct ServiceProvider {
     immutable_state: Arc<ServiceProviderImmutableState>,
-    service_states: Arc<Vec<OnceCell<UntypedPointer>>>,
-    is_root: bool
+    service_states: Arc<ServiceProviderMutableState>,
+    is_root: bool,
 }
 
 impl Debug for ServiceProvider {
@@ -380,20 +429,58 @@ impl Debug for ServiceProvider {
         f.write_fmt(format_args!(
             "ServiceProvider (services: {}, with_state: {})",
             self.immutable_state.producers.len(),
-            self.service_states.len()
+            self.service_states.shared_services.len()
         ))
     }
 }
 
+/// Dropping ServiceProviders created by ServiceCollection::build() or ServiceProviderFactory::build()
+/// directly are expected to have no remaining clones when they are dropped. Clones could be used in services
+/// which have a dependency to ServiceProvider or ServiceIterators<T>, which are using ServiceProvider internally)
+#[cfg(debug_assertions)]
+#[allow(clippy::needless_collect)]
 impl Drop for ServiceProvider {
     fn drop(&mut self) {
         if !self.is_root {
             return;
         }
 
-        let count = Arc::strong_count(&self.service_states);
-        if count > 1 {
-            panic!("Original ServiceProvider was dropped while still beeing used {} times", count - 1);
+        let mut swapped_service_states = Arc::new(ServiceProviderMutableState {
+            base: None,
+            shared_services: Vec::new(),
+        });
+        core::mem::swap(&mut swapped_service_states, &mut self.service_states);
+
+        match Arc::try_unwrap(swapped_service_states) {
+            Ok(service_states) => {
+                let checkers: Vec<_> = service_states
+                    .shared_services
+                    .into_iter()
+                    .filter_map(|c| c.get().and_then(|x| x.get_weak_checker_if_dangling()))
+                    .collect();
+                let errors: Vec<_> = checkers
+                    .into_iter()
+                    .filter_map(|c| {
+                        let v = (c)();
+                        (v.remaining_references > 0).then(|| v)
+                    })
+                    .collect();
+
+                if !errors.is_empty() {
+                    unsafe {
+                        ERROR_HANDLER(&alloc::format!(
+                            "Some instances outlived their ServiceProvider: {:?}",
+                            errors
+                        ))
+                    };
+                }
+            }
+            Err(x) => unsafe {
+                ERROR_HANDLER(&alloc::format!(
+                    "Original ServiceProvider was dropped while still beeing used {} times",
+                    Arc::strong_count(&x) - 1
+                ));
+            },
         }
     }
 }
@@ -403,33 +490,50 @@ impl ServiceProvider {
         T::resolve(self)
     }
 
-    fn clone(&self) -> Self {
-        Self {
-            immutable_state: self.immutable_state.clone(),
-            service_states: self.service_states.clone(),
-            is_root: false
-        }
-    }
-
-    fn get_or_initialize_pos<T: Clone + Any, TFn: Fn() -> T>(
+    fn get_or_initialize_pos<T: Any + ?Sized, TFn: Fn() -> Arc<T>>(
         &self,
         index: usize,
         initializer: TFn,
-    ) -> T {
+    ) -> Arc<T> {
         let pointer = self
             .service_states
+            .shared_services
             .get(index)
             .unwrap()
             .get_or_init(|| UntypedPointer::new(initializer()));
+        unsafe { pointer.clone_as::<Arc<T>>() }
+    }
+}
 
-        unsafe { pointer.borrow_as::<T>() }.clone()
+/// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
+/// their original ServiceProvider. If they do, the iocrs::ERROR_HANDLER is called
+pub struct WeakServiceProvider(ServiceProvider);
+
+impl WeakServiceProvider {
+    pub fn get<T: Resolvable>(&self) -> T::Item {
+        T::resolve(&self.0)
+    }
+}
+
+impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
+    fn from(provider: &'a ServiceProvider) -> Self {
+        WeakServiceProvider(ServiceProvider {
+            immutable_state: provider.immutable_state.clone(),
+            service_states: provider.service_states.clone(),
+            is_root: false,
+        })
     }
 }
 
 struct ServiceProviderImmutableState {
     producers: Vec<UntypedFn>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
-    _parents: Vec<ServiceProvider>,
+    _parents: Vec<WeakServiceProvider>,
+}
+
+struct ServiceProviderMutableState {
+    base: Option<Box<dyn Any>>,
+    shared_services: Vec<OnceCell<UntypedPointer>>,
 }
 
 #[cfg(test)]
@@ -439,6 +543,48 @@ mod tests {
         super::*,
         core::sync::atomic::{AtomicI32, Ordering},
     };
+
+    #[test]
+    #[should_panic(expected = "Panicking while copy exists")]
+    fn drop_service_provider_with_existing_clone_on_panic_is_recoverable_with_default_error_handler(
+    ) {
+        let mut _outer = None;
+        {
+            let mut collection = ServiceCollection::new();
+            collection.with::<WeakServiceProvider>().register(|p| p);
+            let provider = collection.build().unwrap();
+            _outer = Some(provider.get::<Registered<WeakServiceProvider>>().unwrap());
+            panic!("Panicking while copy exists");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Panicking while shared exists")]
+    fn drop_service_provider_with_existing_shared_registered_on_panic_is_recoverable_with_default_error_handler(
+    ) {
+        let mut _outer = None;
+        {
+            let mut collection = ServiceCollection::new();
+            collection.register_shared(|| Arc::new(1i32));
+            let provider = collection.build().unwrap();
+            _outer = Some(provider.get::<Registered<Arc<i32>>>().unwrap());
+            panic!("Panicking while shared exists");
+        }
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Some instances outlived their ServiceProvider: [Type: i32 (remaining 1)]"
+    )]
+    fn drop_service_provider_with_existing_shared_registered_is_panicking() {
+        let mut _outer = None;
+        {
+            let mut collection = ServiceCollection::new();
+            collection.register_shared(|| Arc::new(1i32));
+            let provider = collection.build().unwrap();
+            _outer = Some(provider.get::<Registered<Arc<i32>>>().unwrap());
+        }
+    }
 
     #[test]
     fn resolve_last_transient() {
@@ -456,7 +602,7 @@ mod tests {
     fn resolve_shared() {
         let mut col = ServiceCollection::new();
         col.register_shared(|| Arc::new(AtomicI32::new(1)));
-        col.with::<ServiceProvider>()
+        col.with::<WeakServiceProvider>()
             .register_shared(|_| Arc::new(AtomicI32::new(2)));
 
         let provider = col.build().expect("Should have all Dependencies");
@@ -706,20 +852,12 @@ mod tests {
         let mut container = ServiceCollection::new();
         container.register(|| 32i32);
         container.register_shared(|| Arc::new(64i64));
-        let (a, b) = container
+        let provider = container
             .build()
-            .expect("Expected to have all dependencies")
-            .get::<(Registered<i32>, Registered<Arc<i64>>)>();
+            .expect("Expected to have all dependencies");
+        let (a, b) = provider.get::<(Registered<i32>, Registered<Arc<i64>>)>();
         assert_eq!(Some(32), a);
         assert_eq!(Some(64), b.map(|i| *i));
-    }
-
-    #[test]
-    fn test_size() {
-        fn new_dyn() -> Arc<dyn Service> {
-            Arc::new(ServiceImpl(Arc::new(1i32))) as Arc<dyn Service>
-        }
-        assert_eq!(1, new_dyn().get_value());
     }
 
     #[test]
@@ -737,6 +875,8 @@ mod tests {
             .expect("Expected to get a service");
 
         assert_eq!(42, service.get_value());
+        drop(service);
+        drop(provider);
     }
 
     trait Service {

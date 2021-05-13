@@ -1,16 +1,15 @@
 use {
     super::*,
-    crate::{
-        untyped::UntypedPointer, ServiceCollection, ServiceProducer, ServiceProvider,
-        ServiceProviderImmutableState,
-    },
+    crate::{ServiceCollection, ServiceProducer, ServiceProvider, ServiceProviderImmutableState},
     alloc::sync::Arc,
     core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
 };
 
-/// Does all checks to build a ServiceProvider on premise that an instance of T will be available.
-/// Therefore multiple ServiceProvider with different scoped information like HttpRequest can be created very efficiently
+/// Performs all checks to build a ServiceProvider on premise that an instance of type T will be available.
+/// Therefore, multiple ServiceProvider with a different base can be created very efficiently.
+/// This base could e.g. be the ApplicationSettings for the DomainServices or the HttpContext, if one ServiceProvider
+/// is generated per HTTP-Request in the WebApi
 pub struct ServiceProviderFactory<T: Any + Clone> {
     service_states_count: usize,
     immutable_state: Arc<ServiceProviderImmutableState>,
@@ -19,14 +18,14 @@ pub struct ServiceProviderFactory<T: Any + Clone> {
 
 pub struct ServiceProviderFactoryBuilder {
     collection: ServiceCollection,
-    providers: Vec<ServiceProvider>,
+    providers: Vec<WeakServiceProvider>,
 }
 
 impl ServiceProviderFactoryBuilder {
-    pub fn create(collection: ServiceCollection, first_parent: ServiceProvider) -> Self {
+    pub fn create(collection: ServiceCollection, first_parent: WeakServiceProvider) -> Self {
         Self {
             collection,
-            providers: alloc::vec!(first_parent)
+            providers: alloc::vec!(first_parent),
         }
     }
     pub fn build<T: Any + Clone>(self) -> Result<ServiceProviderFactory<T>, super::BuildError> {
@@ -34,23 +33,22 @@ impl ServiceProviderFactoryBuilder {
     }
 }
 
-const ANTICIPATED_SERVICE_POSITION: usize = 0;
-
 impl<T: Any + Clone> ServiceProviderFactory<T> {
     pub fn create(
         mut collection: ServiceCollection,
-        parents: Vec<ServiceProvider>,
+        parents: Vec<WeakServiceProvider>,
     ) -> Result<Self, super::BuildError> {
         let parent_service_factories: Vec<_> = parents
             .iter()
             .flat_map(|parent| {
                 parent
+                    .0
                     .immutable_state
                     .producers
                     .iter()
                     .map(move |parent_producer| {
                         // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                        let factory = unsafe { parent_producer.bind(parent) };
+                        let factory = unsafe { parent_producer.bind(&parent.0) };
                         ServiceProducer::new_with_type(
                             Box::new(move |_| Ok(factory)),
                             *parent_producer.get_result_type_id(),
@@ -60,9 +58,11 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
             .collect();
 
         let factory: crate::UntypedFnFactory = Box::new(move |_service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider) -> T> = Box::new(move |provider| {
-                provider.get_or_initialize_pos(ANTICIPATED_SERVICE_POSITION, || unreachable!())
-            });
+            let creator: Box<dyn Fn(&ServiceProvider) -> T> =
+                Box::new(move |provider| match &provider.service_states.base {
+                    Some(x) => x.downcast_ref::<T>().unwrap().clone(),
+                    None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
+                });
             Ok(creator.into())
         });
 
@@ -70,9 +70,8 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
 
-        let mut service_states_count = 1;
-        let producers =
-            collection.validate_producers(parent_service_factories, &mut service_states_count)?;
+        let (producers, service_states_count) =
+            collection.validate_producers(parent_service_factories)?;
 
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
@@ -86,18 +85,32 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
         })
     }
 
+    ///
+    /// S
+    ///
+    /// The ServiceProvider should always be assigned to a variable.
+    /// Otherwise, a requested shared service it will outlive its ServiceProvider,
+    /// resulting in a panic if debug_assertions are enabled
+    /// ```
+    /// use {ioc_rs::{Registered, ServiceCollection}, std::sync::Arc};
+    /// assert!(std::panic::catch_unwind(|| {
+    ///     let mut collection = ServiceCollection::new();
+    ///     collection.register_shared(|| Arc::new(42));
+    ///     let factory = collection.build_factory().expect("Configuration is valid");
+    ///     let x = factory.build(1).get::<Registered<Arc<i32>>>(); // ServiceProvider is dropped too early
+    /// }).is_err());
+    /// ```
+    ///
     pub fn build(&self, remaining: T) -> ServiceProvider {
-        let service_states = alloc::vec![OnceCell::new(); self.service_states_count];
-
-        service_states
-            .get(ANTICIPATED_SERVICE_POSITION)
-            .unwrap()
-            .get_or_init(|| UntypedPointer::new(remaining));
+        let shared_services = alloc::vec![OnceCell::new(); self.service_states_count];
 
         ServiceProvider {
-            service_states: Arc::new(service_states),
+            service_states: Arc::new(ServiceProviderMutableState {
+                shared_services,
+                base: Some(Box::new(remaining)),
+            }),
             immutable_state: self.immutable_state.clone(),
-            is_root: true
+            is_root: true,
         }
     }
 }
@@ -110,13 +123,6 @@ mod tests {
         core::sync::atomic::{AtomicI32, Ordering},
     };
 
-    // todo: Test dropping ServiceProviderFactory doesn't try to free uninitialized
-
-    #[test]
-    fn servicefactory_drops_safely() {
-   
-    }
-
     #[test]
     fn services_are_returned_in_correct_order() {
         let mut parent_collection = ServiceCollection::new();
@@ -127,7 +133,10 @@ mod tests {
 
         let mut child_collection = ServiceCollection::new();
         child_collection.register(|| 1);
-        let child_factory = child_collection.with_parent(&parent_provider).build::<i32>().unwrap();
+        let child_factory = child_collection
+            .with_parent(&parent_provider)
+            .build::<i32>()
+            .unwrap();
         let child_provider = child_factory.build(2);
         let iterator = child_provider.get::<AllRegistered<i32>>();
 
@@ -165,14 +174,18 @@ mod tests {
         collection
             .with::<Registered<i32>>()
             .register_shared(|s| Arc::new(s as i64));
-        let result = collection.build_factory().map(|factory| {
-            (
-                factory.build(1).get::<Registered<Arc<i64>>>(),
-                factory.build(2).get::<Registered<Arc<i64>>>(),
-            )
-        });
+        let factory = collection.build_factory().unwrap();
+        let provider1 = factory.build(1);
+        let provider2 = factory.build(2);
 
-        assert_eq!(Ok((Some(Arc::new(1i64)), Some(Arc::new(2i64)))), result);
+        assert_eq!(
+            Some(Arc::new(1i64)),
+            provider1.get::<Registered<Arc<i64>>>()
+        );
+        assert_eq!(
+            Some(Arc::new(2i64)),
+            provider2.get::<Registered<Arc<i64>>>()
+        );
     }
 
     #[test]
@@ -188,10 +201,8 @@ mod tests {
 
             let first = first_factory.get::<Registered<Arc<AtomicI32>>>().unwrap();
 
-            let second = factory
-                .build(())
-                .get::<Registered<Arc<AtomicI32>>>()
-                .unwrap();
+            let second_factory = factory.build(());
+            let second = second_factory.get::<Registered<Arc<AtomicI32>>>().unwrap();
 
             (
                 first.load(Ordering::Relaxed),

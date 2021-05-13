@@ -174,20 +174,17 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
     }
 }
 
-impl Resolvable for ServiceProvider {
+impl Resolvable for WeakServiceProvider {
     // Doesn't make sense to call from the outside
     type Item = ();
-    type ItemPreChecked = ServiceProvider;
+    type ItemPreChecked = Self;
     type PrecheckResult = ();
     type TypeIdsIter = Empty<usize>;
 
     fn resolve(_provider: &ServiceProvider) -> Self::Item {}
 
-    fn resolve_prechecked(
-        provider: &ServiceProvider,
-        _: &(),
-    ) -> Self::ItemPreChecked {
-        provider.clone()
+    fn resolve_prechecked(provider: &ServiceProvider, _: &()) -> Self::ItemPreChecked {
+        provider.into()
     }
 
     fn precheck(_: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
@@ -216,7 +213,8 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_pos.map(|i| {
-            self.next_pos = if let Some(next) = self.provider.immutable_state.producers.get(i + 1) {
+            self.next_pos = if let Some(next) = self.provider.0.immutable_state.producers.get(i + 1)
+            {
                 if next.get_result_type_id() == &TypeId::of::<T>() {
                     Some(i + 1)
                 } else {
@@ -226,7 +224,7 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
                 None
             };
 
-            unsafe { resolve_unchecked::<T>(&self.provider, i) }
+            unsafe { resolve_unchecked::<T>(&self.provider.0, i) }
         })
     }
 
@@ -237,12 +235,12 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
         self.next_pos.map(|i| {
             // If has_next, last must exist
             let pos = binary_search::binary_search_last_by_key(
-                &self.provider.immutable_state.producers[i..],
+                &self.provider.0.immutable_state.producers[i..],
                 &TypeId::of::<T>(),
                 |f| &f.get_result_type_id(),
             )
             .unwrap();
-            unsafe { resolve_unchecked::<T>(&self.provider, i + pos) }
+            unsafe { resolve_unchecked::<T>(&self.provider.0, i + pos) }
         })
     }
     fn count(self) -> usize
@@ -252,7 +250,7 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
         self.next_pos
             .map(|i| {
                 let pos = binary_search::binary_search_last_by_key(
-                    &self.provider.immutable_state.producers[i..],
+                    &self.provider.0.immutable_state.producers[i..],
                     &TypeId::of::<T>(),
                     |f| &f.get_result_type_id(),
                 )
@@ -276,7 +274,7 @@ impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
             |f| &f.get_result_type_id(),
         );
         ServiceIterator {
-            provider: provider.clone(),
+            provider: provider.into(),
             item_type: PhantomData,
             next_pos,
         }
@@ -339,9 +337,10 @@ impl<T: Any> resolvable::Resolvable for Registered<T> {
     }
 
     fn precheck(producers: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
-        binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f).ok_or_else(
-            || BuildError::MissingDependency(super::MissingDependencyType::new::<Self>()),
-        )
+        binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f)
+            .ok_or_else(|| {
+                BuildError::MissingDependency(super::MissingDependencyType::new::<Self>())
+            })
     }
 
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {

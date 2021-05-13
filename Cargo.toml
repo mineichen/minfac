@@ -12,3 +12,7 @@ edition = "2018"
 
 [dependencies]
 once_cell = {version = "1.5", features = []}
+
+[features]
+default = ["std"]
+std = []
