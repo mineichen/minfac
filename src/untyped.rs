@@ -1,7 +1,7 @@
 use {
     crate::{Registered, ServiceProvider},
     alloc::{boxed::Box, sync::Arc},
-    core::any::{type_name, Any, TypeId},
+    core::any::{Any, TypeId},
 };
 
 #[derive(Clone)]
@@ -53,13 +53,16 @@ impl Drop for UntypedFn {
     }
 }
 
+#[cfg(debug_assertions)]
 type UntypedPointerChecker = Option<Box<dyn Fn() -> DanglingCheckerResult>>;
+
 #[derive(Clone)]
 pub struct UntypedPointer {
-    #[cfg(debug_assertions)]
-    debug_type: TypeId,
     pointer: *mut (),
     destroyer: fn(*mut ()),
+    #[cfg(debug_assertions)]
+    debug_type: TypeId,
+    #[cfg(debug_assertions)]
     checker: fn(*mut ()) -> UntypedPointerChecker,
 }
 
@@ -83,10 +86,12 @@ impl core::fmt::Debug for DanglingCheckerResult {
 impl UntypedPointer {
     pub fn new<T: Any + ?Sized>(data: Arc<T>) -> Self {
         Self {
-            #[cfg(debug_assertions)]
-            debug_type: TypeId::of::<Arc<T>>(),
             pointer: Box::into_raw(Box::new(data)) as *mut (),
             destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },
+            #[cfg(debug_assertions)]
+            debug_type: TypeId::of::<Arc<T>>(),
+
+            #[cfg(debug_assertions)]
             checker: |x| {
                 let arc_ref: &Arc<T> = unsafe { &*(x as *mut Arc<T>) };
                 let count = Arc::strong_count(arc_ref);
@@ -94,7 +99,7 @@ impl UntypedPointer {
                     let weak = Arc::downgrade(arc_ref);
                     Some(Box::new(move || DanglingCheckerResult {
                         remaining_references: weak.strong_count(),
-                        typename: type_name::<T>(),
+                        typename: core::any::type_name::<T>(),
                     }))
                 } else {
                     None
@@ -109,6 +114,7 @@ impl UntypedPointer {
     /// Returns a lambda which can be called even after the UntypedPointer is destroyed
     /// The checker is just created, if the strong_count > 1. Because this method is used in the desturctor of ServiceProvider,
     /// the pointer which is causing > 1 is held by the ServiceProvider itself.
+    #[cfg(debug_assertions)]
     pub fn get_weak_checker_if_dangling(&self) -> Option<Box<dyn Fn() -> DanglingCheckerResult>> {
         (self.checker)(self.pointer)
     }
@@ -117,10 +123,11 @@ impl UntypedPointer {
 impl Default for UntypedPointer {
     fn default() -> Self {
         Self {
-            #[cfg(debug_assertions)]
-            debug_type: TypeId::of::<()>(),
             pointer: core::ptr::null_mut(),
             destroyer: |_| {},
+            #[cfg(debug_assertions)]
+            debug_type: TypeId::of::<()>(),
+            #[cfg(debug_assertions)]
             checker: |_| None,
         }
     }

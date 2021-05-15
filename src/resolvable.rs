@@ -281,10 +281,10 @@ impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
     }
 
     fn resolve_prechecked(
-        container: &ServiceProvider,
+        provider: &ServiceProvider,
         _: &Self::PrecheckResult,
     ) -> Self::ItemPreChecked {
-        Self::resolve(container)
+        Self::resolve(provider)
     }
 
     fn precheck(_: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
@@ -320,20 +320,20 @@ impl<T: Any> resolvable::Resolvable for Registered<T> {
     type PrecheckResult = usize;
     type TypeIdsIter = core::iter::Once<usize>;
 
-    fn resolve(container: &ServiceProvider) -> Self::Item {
+    fn resolve(provider: &ServiceProvider) -> Self::Item {
         binary_search::binary_search_last_by_key(
-            &container.immutable_state.producers,
+            &provider.immutable_state.producers,
             &TypeId::of::<Self>(),
             |f| &f.get_result_type_id(),
         )
-        .map(|index| unsafe { resolve_unchecked::<Self>(container, index) })
+        .map(|index| unsafe { resolve_unchecked::<Self>(provider, index) })
     }
 
     fn resolve_prechecked(
-        container: &ServiceProvider,
+        provider: &ServiceProvider,
         index: &Self::PrecheckResult,
     ) -> Self::ItemPreChecked {
-        unsafe { resolve_unchecked::<Self>(container, *index) }
+        unsafe { resolve_unchecked::<Self>(provider, *index) }
     }
 
     fn precheck(producers: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {

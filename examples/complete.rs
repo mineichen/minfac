@@ -2,7 +2,7 @@
 //! If you can understand all assertions, you've seen all aspects of this library
 
 use {
-    ioc_rs::{AllRegistered, Registered, ServiceCollection, ServiceIterator, WeakServiceProvider},
+    ioc_rs::{AllRegistered, Registered, ServiceCollection, WeakServiceProvider},
     std::sync::Arc,
 };
 
@@ -27,22 +27,16 @@ fn main() {
     child_collection.register(|| 3u8);
     child_collection
         .with::<(WeakServiceProvider, AllRegistered<u8>, Registered<u32>)>()
-        .register(
-            |(provider, bytes, int): (
-                WeakServiceProvider,
-                ServiceIterator<Registered<u8>>,
-                u32,
-            )| {
-                provider.get::<Registered<Arc<u16>>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
+        .register(|(provider, bytes, int)| {
+            provider.get::<Registered<Arc<u16>>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
                 + provider.get::<Registered<u128>>().map(|i| i as u64).unwrap_or(2000) // Optional Dependency, fallback
                 + bytes.map(|i| { i as u64 }).sum::<u64>()
                 + int as u64
-            },
-        );
+        });
 
     let child_provider = child_collection
         .with_parent(&parent_provider)
-        .build()
+        .build_factory()
         .expect("All dependencies of child should be resolvable")
         .build(4u8);
 

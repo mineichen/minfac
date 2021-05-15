@@ -1,16 +1,20 @@
 use ioc_rs::{self, AllRegistered, BuildError, Registered, ServiceCollection};
 
 #[test]
-fn handle_cyclic_refernces() {
+fn handle_cyclic_references() {
     let mut col = ServiceCollection::new();
     col.with::<Registered<i64>>().register(|_| 0i16);
     col.with::<Registered<i16>>().register(|_| 0i32);
     col.with::<Registered<i32>>().register(|_| 0i64);
 
-    assert_eq!(
-        BuildError::CyclicDependency("i32 -> i16 -> i64 -> i32".to_owned()),
-        col.build().expect_err("Expected to return error")
-    );
+    let err = col.build().expect_err("Expected to return error");
+    let msg = match err {
+        BuildError::CyclicDependency(msg) => msg,
+        _ => panic!("Expected BuildError::CyclicDependency"),
+    };
+    assert!(msg.contains("i32 -> i16"));
+    assert!(msg.contains("i16 -> i64"));
+    assert!(msg.contains("i64 -> i32"));
 }
 
 #[test]

@@ -12,10 +12,10 @@ impl interface::Service for PluginService {
 }
 
 #[no_mangle]
-pub fn register(container: &mut ServiceCollection) {
+pub fn register(collection: &mut ServiceCollection) {
     println!("plugin: Register Service");
-    container.register_shared(|| Arc::new(PluginService) as Arc<dyn interface::Service>);
-    container
+    collection.register_shared(|| Arc::new(PluginService) as Arc<dyn interface::Service>);
+    collection
         .with::<Registered<i32>>()
         .register(|i| i as i64 * 3);
 }

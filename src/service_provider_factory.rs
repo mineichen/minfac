@@ -9,7 +9,19 @@ use {
 /// Performs all checks to build a ServiceProvider on premise that an instance of type T will be available.
 /// Therefore, multiple ServiceProvider with a different base can be created very efficiently.
 /// This base could e.g. be the ApplicationSettings for the DomainServices or the HttpContext, if one ServiceProvider
-/// is generated per HTTP-Request in the WebApi
+/// is generated per HTTP-Request in a WebApi
+/// ```
+/// use {ioc_rs::{Registered, ServiceCollection}};
+///
+/// let mut collection = ServiceCollection::new();
+/// collection.with::<Registered<i32>>().register(|v| v as i64);
+/// let factory = collection.build_factory().expect("Config should be valid");
+/// let provider1 = factory.build(1);
+/// let provider2 = factory.build(2);
+///
+/// assert_eq!(Some(1i64), provider1.get::<Registered<i64>>());
+/// assert_eq!(Some(2i64), provider2.get::<Registered<i64>>());
+/// ```
 pub struct ServiceProviderFactory<T: Any + Clone> {
     service_states_count: usize,
     immutable_state: Arc<ServiceProviderImmutableState>,
@@ -28,7 +40,9 @@ impl ServiceProviderFactoryBuilder {
             providers: alloc::vec!(first_parent),
         }
     }
-    pub fn build<T: Any + Clone>(self) -> Result<ServiceProviderFactory<T>, super::BuildError> {
+    pub fn build_factory<T: Any + Clone>(
+        self,
+    ) -> Result<ServiceProviderFactory<T>, super::BuildError> {
         ServiceProviderFactory::create(self.collection, self.providers)
     }
 }
@@ -85,22 +99,23 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
         })
     }
 
-    ///
-    /// S
-    ///
     /// The ServiceProvider should always be assigned to a variable.
     /// Otherwise, a requested shared service it will outlive its ServiceProvider,
     /// resulting in a panic if debug_assertions are enabled
     /// ```
+    /// # // don't actually run the test, because it fails for "cargo test --release"
+    /// # // #[cfg(debug_assertions)] is still enabled for doctest, but not for the actual library
+    /// # fn no_op() {
     /// use {ioc_rs::{Registered, ServiceCollection}, std::sync::Arc};
-    /// assert!(std::panic::catch_unwind(|| {
+    /// let result = std::panic::catch_unwind(|| {
     ///     let mut collection = ServiceCollection::new();
     ///     collection.register_shared(|| Arc::new(42));
     ///     let factory = collection.build_factory().expect("Configuration is valid");
     ///     let x = factory.build(1).get::<Registered<Arc<i32>>>(); // ServiceProvider is dropped too early
-    /// }).is_err());
+    /// });
+    /// assert!(result.is_err());
+    /// # }
     /// ```
-    ///
     pub fn build(&self, remaining: T) -> ServiceProvider {
         let shared_services = alloc::vec![OnceCell::new(); self.service_states_count];
 
@@ -110,6 +125,7 @@ impl<T: Any + Clone> ServiceProviderFactory<T> {
                 base: Some(Box::new(remaining)),
             }),
             immutable_state: self.immutable_state.clone(),
+            #[cfg(debug_assertions)]
             is_root: true,
         }
     }
@@ -135,7 +151,7 @@ mod tests {
         child_collection.register(|| 1);
         let child_factory = child_collection
             .with_parent(&parent_provider)
-            .build::<i32>()
+            .build_factory::<i32>()
             .unwrap();
         let child_provider = child_factory.build(2);
         let iterator = child_provider.get::<AllRegistered<i32>>();
@@ -155,7 +171,10 @@ mod tests {
         child_provider
             .with::<Registered<Arc<AtomicI32>>>()
             .register(|i| Box::new(i));
-        let child_factory = child_provider.with_parent(&parent).build::<i64>().unwrap();
+        let child_factory = child_provider
+            .with_parent(&parent)
+            .build_factory::<i64>()
+            .unwrap();
         let child1_value = child_factory
             .build(1)
             .get::<Registered<Box<Arc<AtomicI32>>>>()

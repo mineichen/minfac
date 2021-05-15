@@ -1,5 +1,4 @@
 //! # Lightweight Inversion of control
-//! IOC framework inspired by .Net's Microsoft.Extensions.DependencyInjection
 //! ```
 //! use {ioc_rs::{Registered, ServiceCollection}};
 //!
@@ -16,13 +15,13 @@
 //! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 //! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
 //! - No wasteful reference counting. Transient services are retrieved as `T`, SharedServices as `Arc<T>`
-//! - Inheritance (one ServiceProvider can inherit services from one or multiple parent ServiceProviders) to avoid concept of scoped services
-//! - Service discovery, e.g. `service_provider.get::<DynamicServices<i32>>()` returns an lazy iterator over all registered i32
+//! - Inheritance (one ServiceProvider can inherit services from other ServiceProviders) as an alternative to scoped services
+//! - Service discovery, e.g. `provider.get::<DynamicServices<i32>>()` returns a lazy iterator over all registered i32
 //! - Fail fast. When building a `ServiceProvider` all registered services are checked to
 //!   - have all dependencies
 //!   - contain no dependency-cycles
 //! - Common pitfalls of traditional IOC are prevented by design
-//!   - Singleton services cannot reference scoped services (see examples/complete.rs)
+//!   - Singleton services cannot reference scoped services, as scoped services don't exist
 //!   - Shared services cannot outlive their `ServiceProvider` (checked at runtime when debug_assertions are enabled)
 //! - `#[no_std]`
 //!
@@ -50,7 +49,7 @@ use {
     },
     once_cell::sync::OnceCell,
     resolvable::Resolvable,
-    service_provider_factory::{ServiceProviderFactory, ServiceProviderFactoryBuilder},
+    service_provider_factory::ServiceProviderFactoryBuilder,
     untyped::{UntypedFn, UntypedPointer},
 };
 
@@ -59,6 +58,8 @@ mod resolvable;
 mod service_provider_factory;
 mod untyped;
 
+pub use service_provider_factory::ServiceProviderFactory;
+
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
 /// - ServiceIterator<T>, which owns a WeakServiceProvider internally, outlives its ServiceProvider
@@ -66,12 +67,15 @@ mod untyped;
 ///
 /// Ignoring errors is strongly discouraged, but doesn't cause any undefined behavior or memory leaks by the framework.
 /// However, leaking context specific services often lead to memory leaks in user code which are difficult to find:
-/// All shared references of a ServiceProvider are kept alive if the result of a single serviceProvider::get::<AllRegistered<i32>>() call
+/// All shared references of a ServiceProvider are kept alive if the result of a single provider::get::<AllRegistered<i32>>() call
 /// is leaking it's provider. This can easily happen, if you forget to collect the results into a vector.
-/// To prevent these sneaky errors, ServiceProvider::drop() ensures that none of it's internals are kept alive
+/// To prevent these sneaky errors, ServiceProvider::drop() ensures that none of it's internals are kept alive when debug_assertions are enabled.
 ///
-/// Be aware, that this function could be called while panicking already. In std, panic!(), when the thread is panicking
-/// already, terminates the entire program immediately.
+/// The default implementation panics, if the std-feature is enabled (on by default). Otherwise this is a no_op
+/// For custom implementations, be aware that this function could be called while panicking already.
+/// In std, panic!(), when the thread is panicking already, terminates the entire program immediately.
+///
+/// This variable only exists, if debug_assertions are enabled
 #[cfg(debug_assertions)]
 pub static mut ERROR_HANDLER: fn(msg: &dyn core::fmt::Debug) = |msg| {
     #[cfg(feature = "std")]
@@ -80,7 +84,8 @@ pub static mut ERROR_HANDLER: fn(msg: &dyn core::fmt::Debug) = |msg| {
     }
 };
 
-/// Type used to retrieve all instances of `T` of a `ServiceProvider`
+/// Type used to retrieve all instances `T` of a `ServiceProvider`.
+/// Services are built just in time when calling `next()`
 pub struct ServiceIterator<T> {
     next_pos: Option<usize>,
     provider: WeakServiceProvider,
@@ -90,7 +95,7 @@ pub struct ServiceIterator<T> {
 /// Represents a query for the last registered instance of `T`
 pub struct Registered<T: Any>(PhantomData<T>);
 
-/// Represents a Query for all registered instances of Type `T`.
+/// Represents a query for all registered instances of Type `T`.
 pub struct AllRegistered<T: Any>(PhantomData<T>);
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
@@ -183,8 +188,8 @@ impl ServiceCollection {
     /// let provider = collection.build().expect("Dependencies are ok");
     /// assert_eq!(Some(42 * 4), provider.get::<Registered<u128>>());
     /// ```
-    pub fn with<T: Resolvable>(&mut self) -> ServiceBuilder<'_, T> {
-        ServiceBuilder(self, PhantomData)
+    pub fn with<T: Resolvable>(&mut self) -> private::ServiceBuilder<'_, T> {
+        private::ServiceBuilder(self, PhantomData)
     }
 
     /// Registers a transient service without dependencies.
@@ -233,6 +238,7 @@ impl ServiceCollection {
                 shared_services,
                 base: None,
             }),
+            #[cfg(debug_assertions)]
             is_root: true,
         })
     }
@@ -368,8 +374,14 @@ impl MissingDependencyType {
     }
 }
 
-pub struct ServiceBuilder<'col, T: Resolvable>(&'col mut ServiceCollection, PhantomData<T>);
-impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
+mod private {
+    pub struct ServiceBuilder<'col, T: super::Resolvable>(
+        pub &'col mut super::ServiceCollection,
+        pub core::marker::PhantomData<T>,
+    );
+}
+
+impl<'col, TDep: Resolvable> private::ServiceBuilder<'col, TDep> {
     pub fn register<T: Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let key = TDep::precheck(ctx.final_ordered_types)?;
@@ -417,12 +429,16 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
 /// to retrieve services by type. ServiceProviders are final and cannot be modified anymore. When a ServiceProvider goes
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
-/// dropping the original ServiceProvider results in a call to ioc-rs::ERROR_HANDLER, which panics by default in std.
+/// dropping the original ServiceProvider results in a call to ioc-rs::ERROR_HANDLER, which panics in std and enabled debug_assertions
 pub struct ServiceProvider {
     immutable_state: Arc<ServiceProviderImmutableState>,
     service_states: Arc<ServiceProviderMutableState>,
+    #[cfg(debug_assertions)]
     is_root: bool,
 }
+
+unsafe impl Send for ServiceProvider {}
+unsafe impl Sync for ServiceProvider {}
 
 impl Debug for ServiceProvider {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -520,6 +536,7 @@ impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
         WeakServiceProvider(ServiceProvider {
             immutable_state: provider.immutable_state.clone(),
             service_states: provider.service_states.clone(),
+            #[cfg(debug_assertions)]
             is_root: false,
         })
     }
@@ -573,6 +590,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(
         expected = "Some instances outlived their ServiceProvider: [Type: i32 (remaining 1)]"
     )]
@@ -681,11 +699,11 @@ mod tests {
 
     #[test]
     fn resolve_shared_returns_last_registered() {
-        let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(0));
-        container.register_shared(|| Arc::new(1));
-        container.register_shared(|| Arc::new(2));
-        let provider = container
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Arc::new(0));
+        collection.register_shared(|| Arc::new(1));
+        collection.register_shared(|| Arc::new(2));
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
         let nr_ref = provider.get::<Registered<Arc<i32>>>().unwrap();
@@ -694,11 +712,11 @@ mod tests {
 
     #[test]
     fn resolve_transient_services() {
-        let mut container = ServiceCollection::new();
-        container.register(|| 0);
-        container.register(|| 5);
-        container.register(|| 2);
-        let provider = container
+        let mut collection = ServiceCollection::new();
+        collection.register(|| 0);
+        collection.register(|| 5);
+        collection.register(|| 2);
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
 
@@ -728,19 +746,19 @@ mod tests {
 
     #[test]
     fn no_dependency_needed_if_service_depends_on_services_which_are_not_present() {
-        let mut container = ServiceCollection::new();
-        container.with::<AllRegistered<String>>().register(|_| 0);
+        let mut collection = ServiceCollection::new();
+        collection.with::<AllRegistered<String>>().register(|_| 0);
 
-        assert!(container.build().is_ok())
+        assert!(collection.build().is_ok())
     }
 
     #[test]
     fn resolve_shared_services() {
-        let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(0));
-        container.register_shared(|| Arc::new(5));
-        container.register_shared(|| Arc::new(2));
-        let provider = container
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Arc::new(0));
+        collection.register_shared(|| Arc::new(5));
+        collection.register_shared(|| Arc::new(2));
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
 
@@ -773,10 +791,10 @@ mod tests {
 
     #[test]
     fn resolve_test() {
-        let mut container = ServiceCollection::new();
-        container.register(|| 42);
-        container.register_shared(|| Arc::new(42));
-        let provider = container
+        let mut collection = ServiceCollection::new();
+        collection.register(|| 42);
+        collection.register_shared(|| Arc::new(42));
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
         assert_eq!(
@@ -790,11 +808,11 @@ mod tests {
 
     #[test]
     fn get_registered_dynamic_id() {
-        let mut container = ServiceCollection::new();
-        container.register(|| 42);
+        let mut collection = ServiceCollection::new();
+        collection.register(|| 42);
         assert_eq!(
             Some(42i32),
-            container
+            collection
                 .build()
                 .expect("Expected to have all dependencies")
                 .get::<Registered<i32>>()
@@ -802,11 +820,11 @@ mod tests {
     }
     #[test]
     fn get_registered_dynamic_ref() {
-        let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(42));
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Arc::new(42));
         assert_eq!(
             Some(42i32),
-            container
+            collection
                 .build()
                 .expect("Expected to have all dependencies")
                 .get::<Registered<Arc<i32>>>()
@@ -816,9 +834,9 @@ mod tests {
 
     #[test]
     fn tuple_dependency_resolves_to_prechecked_type() {
-        let mut container = ServiceCollection::new();
-        container.register(|| 64i64);
-        container
+        let mut collection = ServiceCollection::new();
+        collection.register(|| 64i64);
+        collection
             .with::<(Registered<i64>, Registered<i64>)>()
             .register_shared(|(a, b)| {
                 assert_eq!(64, a);
@@ -827,7 +845,7 @@ mod tests {
             });
         assert_eq!(
             Some(42i32),
-            container
+            collection
                 .build()
                 .expect("Expected to have all dependencies")
                 .get::<Registered<Arc<i32>>>()
@@ -837,10 +855,10 @@ mod tests {
 
     #[test]
     fn get_unkown_returns_none() {
-        let container = ServiceCollection::new();
+        let collection = ServiceCollection::new();
         assert_eq!(
             None,
-            container
+            collection
                 .build()
                 .expect("Expected to have all dependencies")
                 .get::<Registered<i32>>()
@@ -849,10 +867,10 @@ mod tests {
 
     #[test]
     fn resolve_tuple_2() {
-        let mut container = ServiceCollection::new();
-        container.register(|| 32i32);
-        container.register_shared(|| Arc::new(64i64));
-        let provider = container
+        let mut collection = ServiceCollection::new();
+        collection.register(|| 32i32);
+        collection.register_shared(|| Arc::new(64i64));
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
         let (a, b) = provider.get::<(Registered<i32>, Registered<Arc<i64>>)>();
@@ -862,12 +880,12 @@ mod tests {
 
     #[test]
     fn register_struct_as_dynamic() {
-        let mut container = ServiceCollection::new();
-        container.register_shared(|| Arc::new(42i32));
-        container
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Arc::new(42i32));
+        collection
             .with::<Registered<Arc<i32>>>()
             .register_shared(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service + Send + Sync>);
-        let provider = container
+        let provider = collection
             .build()
             .expect("Expected to have all dependencies");
         let service = provider

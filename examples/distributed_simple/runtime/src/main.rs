@@ -16,18 +16,18 @@ type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
 /// Runtime: Get 42 multiplied by 3: 126
 ///
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut container = ServiceCollection::new();
-    container.register(|| 42);
+    let mut collection = ServiceCollection::new();
+    collection.register(|| 42);
 
     // Lib must be referenced outside of unsafe block, because it's dropped otherwise, sporadically resulting in a segfault
     let _lib = unsafe {
         let lib = Library::new(format!("target/debug/{}plugin{}", DLL_PREFIX, DLL_SUFFIX))?;
         let func: Symbol<ServiceRegistrar> = lib.get(b"register")?;
-        func(&mut container); 
+        func(&mut collection); 
         lib
     };
 
-    let provider = container
+    let provider = collection
         .build()
         .expect("Expected all dependencies to resolve");
 
