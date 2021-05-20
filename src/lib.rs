@@ -183,7 +183,7 @@ impl ServiceCollection {
     /// collection.with::<((Registered<u8>, Registered<u16>), (Registered<u32>, Registered<u64>))>()
     ///     .register(|((byte, short), (integer, long))| (byte as u128 + short as u128 + integer as u128 + long as u128));
     /// // Inject WeakServiceProvider for optional dependencies or to pass it to a factory
-    /// collection.with::<WeakServiceProvider>().register(|s: WeakServiceProvider| s.resolve::<Registered<u16>>().unwrap() as u32);
+    /// collection.with::<WeakServiceProvider>().register(|s: WeakServiceProvider| s.get::<u16>().unwrap() as u32);
     ///
     /// let provider = collection.build().expect("Dependencies are ok");
     /// assert_eq!(Some(42 * 4), provider.resolve::<Registered<u128>>());
@@ -523,7 +523,10 @@ impl ServiceProvider {
 pub struct WeakServiceProvider(ServiceProvider);
 
 impl WeakServiceProvider {
-    pub fn resolve<T: Resolvable>(&self) -> T::Item {
+    pub fn get<T: Any>(&self) -> Option<T> {
+        self.resolve::<Registered<T>>()
+    }
+    fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(&self.0)
     }
 }

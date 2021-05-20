@@ -28,8 +28,8 @@ fn main() {
     child_collection
         .with::<(WeakServiceProvider, AllRegistered<u8>, Registered<u32>)>()
         .register(|(provider, bytes, int)| {
-            provider.resolve::<Registered<Arc<u16>>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
-                + provider.resolve::<Registered<u128>>().map(|i| i as u64).unwrap_or(2000) // Optional Dependency, fallback
+            provider.get::<Arc<u16>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
+                + provider.get::<u128>().map(|i| i as u64).unwrap_or(2000) // Optional Dependency, fallback
                 + bytes.map(|i| { i as u64 }).sum::<u64>()
                 + int as u64
         });
