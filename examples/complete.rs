@@ -40,16 +40,16 @@ fn main() {
         .expect("All dependencies of child should be resolvable")
         .build(4u8);
 
-    assert_eq!(Some(2), parent_provider.resolve::<Registered<u8>>()); // Last registered i8 on parent
-    assert_eq!(Some(4), child_provider.resolve::<Registered<u8>>()); // Last registered i8 on client
+    assert_eq!(Some(2), parent_provider.get::<u8>()); // Last registered i8 on parent
+    assert_eq!(Some(4), child_provider.get::<u8>()); // Last registered i8 on client
 
     assert_eq!(
         Some(10 + 2000 + (1 + 2 + 3 + 4) + (2 * 10)),
-        child_provider.resolve::<Registered<u64>>()
+        child_provider.get::<u64>()
     );
 
     assert_eq!(
         1 + 2, // Despite u8 beign received by child_provider, u8 is just the sum of i8 from parent
-        child_provider.resolve::<Registered<i8>>().unwrap()
+        child_provider.get::<i8>().unwrap()
     );
 }

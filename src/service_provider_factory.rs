@@ -19,8 +19,8 @@ use {
 /// let provider1 = factory.build(1);
 /// let provider2 = factory.build(2);
 ///
-/// assert_eq!(Some(1i64), provider1.resolve::<Registered<i64>>());
-/// assert_eq!(Some(2i64), provider2.resolve::<Registered<i64>>());
+/// assert_eq!(Some(1i64), provider1.get::<i64>());
+/// assert_eq!(Some(2i64), provider2.get::<i64>());
 /// ```
 pub struct ServiceProviderFactory<T: Any + Clone +  Send + Sync> {
     service_states_count: usize,
@@ -111,7 +111,7 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     ///     let mut collection = ServiceCollection::new();
     ///     collection.register_shared(|| Arc::new(42));
     ///     let factory = collection.build_factory().expect("Configuration is valid");
-    ///     let x = factory.build(1).resolve::<Registered<Arc<i32>>>(); // ServiceProvider is dropped too early
+    ///     let x = factory.build(1).get::<Arc<i32>>(); // ServiceProvider is dropped too early
     /// });
     /// assert!(result.is_err());
     /// # }
@@ -135,7 +135,7 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
 mod tests {
     use {
         super::*,
-        crate::{AllRegistered, BuildError, Registered},
+        crate::{BuildError, Registered},
         core::sync::atomic::{AtomicI32, Ordering},
     };
 
@@ -154,7 +154,7 @@ mod tests {
             .build_factory::<i32>()
             .unwrap();
         let child_provider = child_factory.build(2);
-        let iterator = child_provider.resolve::<AllRegistered<i32>>();
+        let iterator = child_provider.get_all::<i32>();
 
         assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
@@ -177,11 +177,11 @@ mod tests {
             .unwrap();
         let child1_value = child_factory
             .build(1)
-            .resolve::<Registered<Box<Arc<AtomicI32>>>>()
+            .get::<Box<Arc<AtomicI32>>>()
             .unwrap();
         let child2_value = child_factory
             .build(2)
-            .resolve::<Registered<Arc<AtomicI32>>>()
+            .get::<Arc<AtomicI32>>()
             .unwrap();
         child1_value.fetch_add(1, Ordering::Relaxed);
         assert_eq!(43, child2_value.load(Ordering::Relaxed));
@@ -200,7 +200,7 @@ mod tests {
         std::thread::spawn(move || { 
             assert_eq!(
                 Some(Arc::new(1i64)),
-                provider1.resolve::<Registered<Arc<i64>>>()                
+                provider1.get::<Arc<i64>>()                
             );
         }).join().unwrap();
 
@@ -208,7 +208,7 @@ mod tests {
             let provider2 = factory.build(2);
             assert_eq!(
                 Some(Arc::new(2i64)),
-                provider2.resolve::<Registered<Arc<i64>>>()
+                provider2.get::<Arc<i64>>()
             );
         }).join().unwrap();
     }
@@ -221,13 +221,13 @@ mod tests {
 
         let result = collection.build_factory().map(|factory| {
             let first_factory = factory.build(());
-            let first = first_factory.resolve::<Registered<Arc<AtomicI32>>>().unwrap();
+            let first = first_factory.get::<Arc<AtomicI32>>().unwrap();
             assert_eq!(1, first.fetch_add(1, Ordering::Relaxed));
 
-            let first = first_factory.resolve::<Registered<Arc<AtomicI32>>>().unwrap();
+            let first = first_factory.get::<Arc<AtomicI32>>().unwrap();
 
             let second_factory = factory.build(());
-            let second = second_factory.resolve::<Registered<Arc<AtomicI32>>>().unwrap();
+            let second = second_factory.get::<Arc<AtomicI32>>().unwrap();
 
             (
                 first.load(Ordering::Relaxed),
@@ -244,7 +244,7 @@ mod tests {
         collection.with::<Registered<i32>>().register(|s| s as i64);
         let result = collection
             .build_factory()
-            .map(|factory| factory.build(42).resolve::<Registered<i64>>());
+            .map(|factory| factory.build(42i32).get());
         assert_eq!(Ok(Some(42i64)), result);
     }
 

@@ -1,5 +1,5 @@
 use {
-    ioc_rs::{Registered, ServiceCollection},
+    ioc_rs::ServiceCollection,
     std::sync::Arc,
     libloading::{Library, Symbol},
     std::env::consts::{DLL_PREFIX, DLL_SUFFIX}
@@ -32,13 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Expected all dependencies to resolve");
 
     let service = provider
-        .resolve::<Registered<Arc<dyn interface::Service>>>()
+        .get::<Arc<dyn interface::Service>>()
         .expect("Expected plugin to register a &dyn Service");
 
     println!("Runtime: service.call(2) = {}", service.call(2));
 
     let number = provider
-        .resolve::<Registered<i64>>()
+        .get::<i64>()
         .expect("Expected plugin to register i64");
 
     println!("Runtime: Get 42 multiplied by 3: {}", number);

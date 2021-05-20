@@ -9,14 +9,14 @@
 //! collection.register(|| 1u8);
 //! let provider = collection.build().expect("Configuration is valid");
 //!
-//! assert_eq!(Some(2), provider.resolve::<Registered<i16>>());
+//! assert_eq!(Some(2i16), provider.get::<i16>());
 //! ```
 //! # Features
 //! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 //! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
 //! - No wasteful reference counting. Transient services are retrieved as `T`, SharedServices as `Arc<T>`
 //! - Inheritance (one ServiceProvider can inherit services from other ServiceProviders) as an alternative to scoped services
-//! - Service discovery, e.g. `provider.resolve::<DynamicServices<i32>>()` returns a lazy iterator over all registered i32
+//! - Service discovery, e.g. `provider.get_all::<i32>()` returns a lazy iterator over all registered i32
 //! - Fail fast. When building a `ServiceProvider` all registered services are checked to
 //!   - have all dependencies
 //!   - contain no dependency-cycles
@@ -186,7 +186,7 @@ impl ServiceCollection {
     /// collection.with::<WeakServiceProvider>().register(|s: WeakServiceProvider| s.get::<u16>().unwrap() as u32);
     ///
     /// let provider = collection.build().expect("Dependencies are ok");
-    /// assert_eq!(Some(42 * 4), provider.resolve::<Registered<u128>>());
+    /// assert_eq!(Some(42 * 4), provider.get::<u128>());
     /// ```
     pub fn with<T: Resolvable>(&mut self) -> private::ServiceBuilder<'_, T> {
         private::ServiceBuilder(self, PhantomData)
@@ -499,8 +499,15 @@ impl Drop for ServiceProvider {
 }
 
 impl ServiceProvider {
-    pub fn resolve<T: Resolvable>(&self) -> T::Item {
+    fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
+    }
+
+    pub fn get<T: Any>(&self) -> Option<T> {
+        self.resolve::<Registered<T>>()
+    }
+    pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
+        self.resolve::<AllRegistered<T>>()
     }
 
     fn get_or_initialize_pos<T: Any + ?Sized + Send + Sync, TFn: Fn() -> Arc<T>>(
@@ -526,6 +533,11 @@ impl WeakServiceProvider {
     pub fn get<T: Any>(&self) -> Option<T> {
         self.resolve::<Registered<T>>()
     }
+
+    pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
+        self.resolve::<AllRegistered<T>>()
+    }
+    
     fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(&self.0)
     }
@@ -570,7 +582,7 @@ mod tests {
             let mut collection = ServiceCollection::new();
             collection.with::<WeakServiceProvider>().register(|p| p);
             let provider = collection.build().unwrap();
-            _outer = Some(provider.resolve::<Registered<WeakServiceProvider>>().unwrap());
+            _outer = Some(provider.get::<WeakServiceProvider>().unwrap());
             panic!("Panicking while copy exists");
         }
     }
@@ -584,7 +596,7 @@ mod tests {
             let mut collection = ServiceCollection::new();
             collection.register_shared(|| Arc::new(1i32));
             let provider = collection.build().unwrap();
-            _outer = Some(provider.resolve::<Registered<Arc<i32>>>().unwrap());
+            _outer = provider.get::<Arc<i32>>();
             panic!("Panicking while shared exists");
         }
     }
@@ -600,7 +612,7 @@ mod tests {
             let mut collection = ServiceCollection::new();
             collection.register_shared(|| Arc::new(1i32));
             let provider = collection.build().unwrap();
-            _outer = Some(provider.resolve::<Registered<Arc<i32>>>().unwrap());
+            _outer = provider.get::<Arc<i32>>();
         }
     }
 
@@ -612,8 +624,7 @@ mod tests {
         col.register(|| 1);
         col.register(|| 2);
         let provider = col.build().expect("Expected to have all dependencies");
-        let nr = provider.resolve::<Registered<i32>>().unwrap();
-        assert_eq!(2, nr);
+        assert_eq!(Some(2), provider.get());
     }
 
     #[test]
@@ -625,14 +636,14 @@ mod tests {
 
         let provider = col.build().expect("Should have all Dependencies");
         let service = provider
-            .resolve::<Registered<Arc<AtomicI32>>>()
+            .get::<Arc<AtomicI32>>()
             .expect("Expecte to get second");
         assert_eq!(2, service.load(Ordering::Relaxed));
         service.fetch_add(40, Ordering::Relaxed);
 
         assert_eq!(
             provider
-                .resolve::<AllRegistered<Arc<AtomicI32>>>()
+                .get_all::<Arc<AtomicI32>>()
                 .map(|c| c.load(Ordering::Relaxed))
                 .sum::<i32>(),
             1 + 42
@@ -706,7 +717,7 @@ mod tests {
         let provider = collection
             .build()
             .expect("Expected to have all dependencies");
-        let nr_ref = provider.resolve::<Registered<Arc<i32>>>().unwrap();
+        let nr_ref = provider.get::<Arc<i32>>().unwrap();
         assert_eq!(2, *nr_ref);
     }
 
@@ -721,23 +732,23 @@ mod tests {
             .expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = provider.resolve::<AllRegistered<i32>>();
+        let mut count_subset = provider.get_all::<i32>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
-        assert_eq!(3, provider.resolve::<AllRegistered::<i32>>().count());
+        assert_eq!(3, provider.get_all::<i32>().count());
 
         // Last
-        assert_eq!(2, provider.resolve::<AllRegistered<i32>>().last().unwrap());
+        assert_eq!(2, provider.get_all::<i32>().last().unwrap());
 
-        let mut sub = provider.resolve::<AllRegistered<i32>>();
+        let mut sub = provider.get_all::<i32>();
         sub.next();
         assert_eq!(Some(2), sub.last());
 
-        let mut consumed = provider.resolve::<AllRegistered<i32>>();
+        let mut consumed = provider.get_all::<i32>();
         consumed.by_ref().for_each(|_| {});
         assert_eq!(None, consumed.last());
 
-        let mut iter = provider.resolve::<AllRegistered<i32>>();
+        let mut iter = provider.get_all::<i32>();
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(5), iter.next());
         assert_eq!(Some(2), iter.next());
@@ -763,26 +774,26 @@ mod tests {
             .expect("Expected to have all dependencies");
 
         // Count
-        let mut count_subset = provider.resolve::<AllRegistered<Arc<i32>>>();
+        let mut count_subset = provider.get_all::<Arc<i32>>();
         count_subset.next();
         assert_eq!(2, count_subset.count());
-        assert_eq!(3, provider.resolve::<AllRegistered::<Arc<i32>>>().count());
+        assert_eq!(3, provider.get_all::<Arc<i32>>().count());
 
         // Last
         assert_eq!(
             2,
-            *provider.resolve::<AllRegistered<Arc<i32>>>().last().unwrap()
+            *provider.get_all::<Arc<i32>>().last().unwrap()
         );
 
-        let mut sub = provider.resolve::<AllRegistered<Arc<i32>>>();
+        let mut sub = provider.get_all::<Arc<i32>>();
         sub.next();
         assert_eq!(Some(2), sub.last().map(|i| *i));
 
-        let mut consumed = provider.resolve::<AllRegistered<Arc<i32>>>();
+        let mut consumed = provider.get_all::<Arc<i32>>();
         consumed.by_ref().for_each(|_| {});
         assert_eq!(None, consumed.last());
 
-        let mut iter = provider.resolve::<AllRegistered<Arc<i32>>>().map(|i| *i);
+        let mut iter = provider.get_all::<Arc<i32>>().map(|i| *i);
         assert_eq!(Some(0), iter.next());
         assert_eq!(Some(5), iter.next());
         assert_eq!(Some(2), iter.next());
@@ -798,11 +809,10 @@ mod tests {
             .build()
             .expect("Expected to have all dependencies");
         assert_eq!(
-            provider.resolve::<Registered::<i32>>().unwrap(),
+            provider.get::<i32>(),
             provider
-                .resolve::<Registered::<Arc<i32>>>()
+                .get::<Arc<i32>>()
                 .map(|f| *f)
-                .unwrap()
         );
     }
 
@@ -815,7 +825,7 @@ mod tests {
             collection
                 .build()
                 .expect("Expected to have all dependencies")
-                .resolve::<Registered<i32>>()
+                .get()
         );
     }
     #[test]
@@ -827,7 +837,7 @@ mod tests {
             collection
                 .build()
                 .expect("Expected to have all dependencies")
-                .resolve::<Registered<Arc<i32>>>()
+                .get::<Arc<i32>>()
                 .map(|i| *i)
         );
     }
@@ -848,7 +858,7 @@ mod tests {
             collection
                 .build()
                 .expect("Expected to have all dependencies")
-                .resolve::<Registered<Arc<i32>>>()
+                .get::<Arc<i32>>()
                 .map(|i| *i)
         );
     }
@@ -861,7 +871,7 @@ mod tests {
             collection
                 .build()
                 .expect("Expected to have all dependencies")
-                .resolve::<Registered<i32>>()
+                .get::<i32>()
         );
     }
 
@@ -889,7 +899,7 @@ mod tests {
             .build()
             .expect("Expected to have all dependencies");
         let service = provider
-            .resolve::<Registered<Arc<dyn Service + Send + Sync>>>()
+            .get::<Arc<dyn Service + Send + Sync>>()
             .expect("Expected to get a service");
 
         assert_eq!(42, service.get_value());
@@ -923,7 +933,7 @@ mod tests {
         col.register_shared(|| Arc::new(Arc::new(())));
         let prov = col.build().expect("Expected to have all dependencies");
         let inner = prov
-            .resolve::<Registered<Arc<Arc<()>>>>()
+            .get::<Arc<Arc<()>>>()
             .expect("Expected to receive the service")
             .as_ref()
             .clone();
