@@ -56,7 +56,7 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
     type TypeIdsIter = Chain<T0::TypeIdsIter, T1::TypeIdsIter>;
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
-        (provider.get::<T0>(), provider.get::<T1>())
+        (provider.resolve::<T0>(), provider.resolve::<T1>())
     }
 
     fn resolve_prechecked(
@@ -89,9 +89,9 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
-            provider.get::<T0>(),
-            provider.get::<T1>(),
-            provider.get::<T2>(),
+            provider.resolve::<T0>(),
+            provider.resolve::<T1>(),
+            provider.resolve::<T2>(),
         )
     }
     fn resolve_prechecked(
@@ -140,10 +140,10 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         (
-            provider.get::<T0>(),
-            provider.get::<T1>(),
-            provider.get::<T2>(),
-            provider.get::<T3>(),
+            provider.resolve::<T0>(),
+            provider.resolve::<T1>(),
+            provider.resolve::<T2>(),
+            provider.resolve::<T3>(),
         )
     }
     fn resolve_prechecked(

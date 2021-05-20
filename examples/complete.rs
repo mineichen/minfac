@@ -28,8 +28,8 @@ fn main() {
     child_collection
         .with::<(WeakServiceProvider, AllRegistered<u8>, Registered<u32>)>()
         .register(|(provider, bytes, int)| {
-            provider.get::<Registered<Arc<u16>>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
-                + provider.get::<Registered<u128>>().map(|i| i as u64).unwrap_or(2000) // Optional Dependency, fallback
+            provider.resolve::<Registered<Arc<u16>>>().map(|i| *i as u64).unwrap_or(1000) // Optional Dependency, fallback not used
+                + provider.resolve::<Registered<u128>>().map(|i| i as u64).unwrap_or(2000) // Optional Dependency, fallback
                 + bytes.map(|i| { i as u64 }).sum::<u64>()
                 + int as u64
         });
@@ -40,16 +40,16 @@ fn main() {
         .expect("All dependencies of child should be resolvable")
         .build(4u8);
 
-    assert_eq!(Some(2), parent_provider.get::<Registered<u8>>()); // Last registered i8 on parent
-    assert_eq!(Some(4), child_provider.get::<Registered<u8>>()); // Last registered i8 on client
+    assert_eq!(Some(2), parent_provider.resolve::<Registered<u8>>()); // Last registered i8 on parent
+    assert_eq!(Some(4), child_provider.resolve::<Registered<u8>>()); // Last registered i8 on client
 
     assert_eq!(
         Some(10 + 2000 + (1 + 2 + 3 + 4) + (2 * 10)),
-        child_provider.get::<Registered<u64>>()
+        child_provider.resolve::<Registered<u64>>()
     );
 
     assert_eq!(
         1 + 2, // Despite u8 beign received by child_provider, u8 is just the sum of i8 from parent
-        child_provider.get::<Registered<i8>>().unwrap()
+        child_provider.resolve::<Registered<i8>>().unwrap()
     );
 }

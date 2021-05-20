@@ -32,13 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Expected all dependencies to resolve");
 
     let service = provider
-        .get::<Registered<Arc<dyn interface::Service>>>()
+        .resolve::<Registered<Arc<dyn interface::Service>>>()
         .expect("Expected plugin to register a &dyn Service");
 
     println!("Runtime: service.call(2) = {}", service.call(2));
 
     let number = provider
-        .get::<Registered<i64>>()
+        .resolve::<Registered<i64>>()
         .expect("Expected plugin to register i64");
 
     println!("Runtime: Get 42 multiplied by 3: {}", number);
