@@ -30,14 +30,11 @@ where
 
 /// Returns the last position of the needle in the haystack or none, if not found
 /// This function is optimized for searching input with one or just a few occurences of needle
-/// O(log(n)) worst case
-/// slice::binary_search_by_key() seems to return the last entry as well, but docs state that we cant rely on that
 pub fn binary_search_last_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
     U: core::cmp::Ord,
     TFn: Fn(&T) -> &U,
 {
-    let mut result_idx = None;
     let mut front_plus_1 = 1;
     let mut end_plus_1 = input.len();
     while front_plus_1 <= end_plus_1 {
@@ -51,12 +48,12 @@ where
                 && (mid + 1 == input.len()
                     || U::ne((find)(unsafe { input.get_unchecked(mid + 1) }), needle))
             {
-                result_idx = Some(mid);
+                return Some(mid);
             }
             front_plus_1 = mid + 2;
         }
     }
-    result_idx
+    None
 }
 
 #[cfg(test)]

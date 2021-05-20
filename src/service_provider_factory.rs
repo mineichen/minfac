@@ -22,7 +22,7 @@ use {
 /// assert_eq!(Some(1i64), provider1.get::<Registered<i64>>());
 /// assert_eq!(Some(2i64), provider2.get::<Registered<i64>>());
 /// ```
-pub struct ServiceProviderFactory<T: Any + Clone> {
+pub struct ServiceProviderFactory<T: Any + Clone +  Send + Sync> {
     service_states_count: usize,
     immutable_state: Arc<ServiceProviderImmutableState>,
     anticipated: PhantomData<T>,
@@ -40,14 +40,14 @@ impl ServiceProviderFactoryBuilder {
             providers: alloc::vec!(first_parent),
         }
     }
-    pub fn build_factory<T: Any + Clone>(
+    pub fn build_factory<T: Any + Clone + Send + Sync>(
         self,
     ) -> Result<ServiceProviderFactory<T>, super::BuildError> {
         ServiceProviderFactory::create(self.collection, self.providers)
     }
 }
 
-impl<T: Any + Clone> ServiceProviderFactory<T> {
+impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     pub fn create(
         mut collection: ServiceCollection,
         parents: Vec<WeakServiceProvider>,
@@ -195,16 +195,22 @@ mod tests {
             .register_shared(|s| Arc::new(s as i64));
         let factory = collection.build_factory().unwrap();
         let provider1 = factory.build(1);
-        let provider2 = factory.build(2);
+        
 
-        assert_eq!(
-            Some(Arc::new(1i64)),
-            provider1.get::<Registered<Arc<i64>>>()
-        );
-        assert_eq!(
-            Some(Arc::new(2i64)),
-            provider2.get::<Registered<Arc<i64>>>()
-        );
+        std::thread::spawn(move || { 
+            assert_eq!(
+                Some(Arc::new(1i64)),
+                provider1.get::<Registered<Arc<i64>>>()                
+            );
+        }).join().unwrap();
+
+        std::thread::spawn(move|| { 
+            let provider2 = factory.build(2);
+            assert_eq!(
+                Some(Arc::new(2i64)),
+                provider2.get::<Registered<Arc<i64>>>()
+            );
+        }).join().unwrap();
     }
 
     #[test]

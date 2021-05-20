@@ -11,6 +11,9 @@ pub struct UntypedFn {
     wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn,
 }
 
+unsafe impl Send for UntypedFn {}
+unsafe impl Sync for UntypedFn {}
+
 impl UntypedFn {
     pub fn get_result_type_id(&self) -> &TypeId {
         &self.result_type_id
@@ -30,7 +33,7 @@ impl UntypedFn {
     }
 }
 
-impl<T: Any> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn
+impl<T> From<Box<dyn Fn(&ServiceProvider) -> T>> for UntypedFn
 where
     T: Any,
 {
@@ -66,6 +69,10 @@ pub struct UntypedPointer {
     checker: fn(*mut ()) -> UntypedPointerChecker,
 }
 
+// UntypedPointer::new() is the only way to create a UntypedPointer, where T: Sync+Send is a requirement
+unsafe impl Send for UntypedPointer {}
+unsafe impl Sync for UntypedPointer {}
+
 pub struct DanglingCheckerResult {
     pub remaining_references: usize,
     pub typename: &'static str,
@@ -84,7 +91,7 @@ impl core::fmt::Debug for DanglingCheckerResult {
 /// We need this structure, because at the time of writing (13.05.21),
 /// Arc<dyn Any>::downcast<T> doesn't support T: ?Sized
 impl UntypedPointer {
-    pub fn new<T: Any + ?Sized>(data: Arc<T>) -> Self {
+    pub fn new<T: Any + ?Sized + Send + Sync>(data: Arc<T>) -> Self {
         Self {
             pointer: Box::into_raw(Box::new(data)) as *mut (),
             destroyer: |x| unsafe { drop(Box::from_raw(x as *mut Arc<T>)) },

@@ -250,7 +250,7 @@ impl ServiceCollection {
     ///
     /// Unlike shared services, this service's reference counter isn't checked to equal zero when the provider is dropped
     ///
-    pub fn build_factory<T: Clone + Any>(self) -> Result<ServiceProviderFactory<T>, BuildError> {
+    pub fn build_factory<T: Clone + Any + Send + Sync>(self) -> Result<ServiceProviderFactory<T>, BuildError> {
         ServiceProviderFactory::create(self, Vec::new())
     }
 
@@ -353,6 +353,7 @@ impl<'a> CycleChecker<'a> {
 }
 
 /// Possible errors when calling ServiceCollection::build() or ServiceCollection::build_factory()
+#[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuildError {
     MissingDependency(MissingDependencyType),
@@ -379,50 +380,49 @@ mod private {
         pub &'col mut super::ServiceCollection,
         pub core::marker::PhantomData<T>,
     );
-}
-
-impl<'col, TDep: Resolvable> private::ServiceBuilder<'col, TDep> {
-    pub fn register<T: Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
-        let factory: UntypedFnFactory = Box::new(move |ctx| {
-            let key = TDep::precheck(ctx.final_ordered_types)?;
-            ctx.register_cyclic_reference_candidate(
-                core::any::type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
-            );
-            let func: Box<dyn Fn(&ServiceProvider) -> T> =
-                Box::new(move |provider: &ServiceProvider| {
-                    let arg = TDep::resolve_prechecked(provider, &key);
-                    creator(arg)
-                });
-            Ok(func.into())
-        });
-        self.0
-            .producer_factories
-            .push(ServiceProducer::new::<T>(factory));
-    }
-    pub fn register_shared<T: Any + ?Sized + Send + Sync>(
-        &mut self,
-        creator: fn(TDep::ItemPreChecked) -> Arc<T>,
-    ) {
-        let factory: UntypedFnFactory = Box::new(move |ctx| {
-            let service_state_idx = ctx.reserve_state_space();
-            let key = TDep::precheck(ctx.final_ordered_types)?;
-            ctx.register_cyclic_reference_candidate(
-                core::any::type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
-            );
-            let func: Box<dyn Fn(&ServiceProvider) -> Arc<T>> =
-                Box::new(move |provider: &ServiceProvider| {
-                    let moved_key = &key;
-                    provider.get_or_initialize_pos(service_state_idx, move || {
-                        creator(TDep::resolve_prechecked(provider, &moved_key))
-                    })
-                });
-            Ok(func.into())
-        });
-        self.0
-            .producer_factories
-            .push(ServiceProducer::new::<Arc<T>>(factory));
+    impl<'col, TDep: super::Resolvable> ServiceBuilder<'col, TDep> {
+        pub fn register<T: core::any::Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
+            let factory: super::UntypedFnFactory = Box::new(move |ctx| {
+                let key = TDep::precheck(ctx.final_ordered_types)?;
+                ctx.register_cyclic_reference_candidate(
+                    core::any::type_name::<TDep::ItemPreChecked>(),
+                    Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+                );
+                let func: Box<dyn Fn(&super::ServiceProvider) -> T> =
+                    Box::new(move |provider: &super::ServiceProvider| {
+                        let arg = TDep::resolve_prechecked(provider, &key);
+                        creator(arg)
+                    });
+                Ok(func.into())
+            });
+            self.0
+                .producer_factories
+                .push(super::ServiceProducer::new::<T>(factory));
+        }
+        pub fn register_shared<T: core::any::Any + ?Sized + Send + Sync>(
+            &mut self,
+            creator: fn(TDep::ItemPreChecked) -> alloc::sync::Arc<T>,
+        ) {
+            let factory: super::UntypedFnFactory = Box::new(move |ctx| {
+                let service_state_idx = ctx.reserve_state_space();
+                let key = TDep::precheck(ctx.final_ordered_types)?;
+                ctx.register_cyclic_reference_candidate(
+                    core::any::type_name::<TDep::ItemPreChecked>(),
+                    Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+                );
+                let func: Box<dyn Fn(&super::ServiceProvider) -> alloc::sync::Arc<T>> =
+                    Box::new(move |provider: &super::ServiceProvider| {
+                        let moved_key = &key;
+                        provider.get_or_initialize_pos(service_state_idx, move || {
+                            creator(TDep::resolve_prechecked(provider, &moved_key))
+                        })
+                    });
+                Ok(func.into())
+            });
+            self.0
+                .producer_factories
+                .push(super::ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
+        }
     }
 }
 
@@ -436,9 +436,6 @@ pub struct ServiceProvider {
     #[cfg(debug_assertions)]
     is_root: bool,
 }
-
-unsafe impl Send for ServiceProvider {}
-unsafe impl Sync for ServiceProvider {}
 
 impl Debug for ServiceProvider {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -506,7 +503,7 @@ impl ServiceProvider {
         T::resolve(self)
     }
 
-    fn get_or_initialize_pos<T: Any + ?Sized, TFn: Fn() -> Arc<T>>(
+    fn get_or_initialize_pos<T: Any + ?Sized + Send + Sync, TFn: Fn() -> Arc<T>>(
         &self,
         index: usize,
         initializer: TFn,
@@ -549,7 +546,7 @@ struct ServiceProviderImmutableState {
 }
 
 struct ServiceProviderMutableState {
-    base: Option<Box<dyn Any>>,
+    base: Option<Box<dyn Any + Send + Sync>>,
     shared_services: Vec<OnceCell<UntypedPointer>>,
 }
 
@@ -605,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_last_transient() {
+    fn resolve_last() {
         let mut col = ServiceCollection::new();
         col.register(|| 0);
         col.register(|| 5);
@@ -640,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn build_with_missing_transient_dep_fails() {
+    fn build_with_missing_dep_fails() {
         build_with_missing_dependency_fails::<Registered<String>>(&["Registered", "String"]);
     }
 
@@ -711,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_transient_services() {
+    fn resolve_all_services() {
         let mut collection = ServiceCollection::new();
         collection.register(|| 0);
         collection.register(|| 5);
