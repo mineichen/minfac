@@ -4,7 +4,10 @@ use {
 };
 
 /// Represents anything resolvable by a ServiceProvider. This
-pub trait Resolvable: Any {
+pub trait Resolvable: Any + SealedResolvable {
+}
+
+pub trait SealedResolvable {
     /// Used if it's uncertain, wether a type is initializable, e.g.
     /// - Option<i32> for provider.get<Singleton<i32>>()
     type Item;
@@ -31,7 +34,7 @@ pub trait Resolvable: Any {
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter;
 }
 
-impl Resolvable for () {
+impl SealedResolvable for () {
     type Item = ();
     type ItemPreChecked = ();
     type PrecheckResult = ();
@@ -48,8 +51,9 @@ impl Resolvable for () {
         core::iter::empty()
     }
 }
+impl Resolvable for () {}
 
-impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
+impl<T0: Resolvable, T1: Resolvable> SealedResolvable for (T0, T1) {
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult);
@@ -79,8 +83,9 @@ impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {
         T0::iter_positions(types).chain(T1::iter_positions(types))
     }
 }
+impl<T0: Resolvable, T1: Resolvable> Resolvable for (T0, T1) {}
 
-impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> SealedResolvable for (T0, T1, T2) {
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult, T2::PrecheckResult);
@@ -118,7 +123,9 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2)
             .chain(T2::iter_positions(types))
     }
 }
-impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable> Resolvable for (T0, T1, T2) {}
+
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> SealedResolvable
     for (T0, T1, T2, T3)
 {
     type Item = (T0::Item, T1::Item, T2::Item, T3::Item);
@@ -173,8 +180,11 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
             .chain(T3::iter_positions(types))
     }
 }
+impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
+    for (T0, T1, T2, T3)
+{}
 
-impl Resolvable for WeakServiceProvider {
+impl SealedResolvable for WeakServiceProvider {
     // Doesn't make sense to call from the outside
     type Item = ();
     type ItemPreChecked = Self;
@@ -195,6 +205,7 @@ impl Resolvable for WeakServiceProvider {
         core::iter::empty()
     }
 }
+impl Resolvable for WeakServiceProvider {}
 
 /// pos must be a valid index in provider.producers
 unsafe fn resolve_unchecked<T: resolvable::Resolvable>(
@@ -261,7 +272,7 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
     }
 }
 
-impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
+impl<T: Any> SealedResolvable for AllRegistered<T> {
     type Item = ServiceIterator<Registered<T>>;
     type ItemPreChecked = ServiceIterator<Registered<T>>;
     type PrecheckResult = ();
@@ -313,8 +324,10 @@ impl<T: Any> resolvable::Resolvable for AllRegistered<T> {
         }
     }
 }
+impl<T: Any> Resolvable for AllRegistered<T> {}
 
-impl<T: Any> resolvable::Resolvable for Registered<T> {
+
+impl<T: Any> SealedResolvable for Registered<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
     type PrecheckResult = usize;
@@ -352,6 +365,7 @@ impl<T: Any> resolvable::Resolvable for Registered<T> {
         core::iter::once(position)
     }
 }
+impl<T: Any> Resolvable for Registered<T> {}
 #[cfg(test)]
 mod tests {
     use {super::*, alloc::vec};

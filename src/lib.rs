@@ -48,7 +48,6 @@ use {
         marker::PhantomData,
     },
     once_cell::sync::OnceCell,
-    resolvable::Resolvable,
     service_provider_factory::ServiceProviderFactoryBuilder,
     untyped::{UntypedFn, UntypedPointer},
 };
@@ -58,7 +57,9 @@ mod resolvable;
 mod service_provider_factory;
 mod untyped;
 
+
 pub use service_provider_factory::ServiceProviderFactory;
+pub use resolvable::Resolvable;
 
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
@@ -190,6 +191,16 @@ impl ServiceCollection {
     /// ```
     pub fn with<T: Resolvable>(&mut self) -> private::ServiceBuilder<'_, T> {
         private::ServiceBuilder(self, PhantomData)
+    }
+
+    pub fn register_instance<T: Clone + 'static>(&mut self, instance: T) {
+        let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
+            let func: Box<dyn Fn(&ServiceProvider) -> T> =
+                Box::new(move |_: &ServiceProvider| instance.clone());
+            Ok(func.into())
+        });
+        self.producer_factories
+            .push(ServiceProducer::new::<T>(factory));
     }
 
     /// Registers a transient service without dependencies.
@@ -499,7 +510,7 @@ impl Drop for ServiceProvider {
 }
 
 impl ServiceProvider {
-    fn resolve<T: Resolvable>(&self) -> T::Item {
+    pub fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
     }
 
@@ -530,17 +541,17 @@ impl ServiceProvider {
 pub struct WeakServiceProvider(ServiceProvider);
 
 impl WeakServiceProvider {
+    pub fn resolve<T: Resolvable>(&self) -> T::Item {
+        T::resolve(&self.0)
+    }
+    
     pub fn get<T: Any>(&self) -> Option<T> {
         self.resolve::<Registered<T>>()
     }
 
     pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
         self.resolve::<AllRegistered<T>>()
-    }
-    
-    fn resolve<T: Resolvable>(&self) -> T::Item {
-        T::resolve(&self.0)
-    }
+    }    
 }
 
 impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
@@ -941,5 +952,13 @@ mod tests {
         assert_eq!(2, Arc::strong_count(&inner));
         drop(prov);
         assert_eq!(1, Arc::strong_count(&inner));
+    }
+
+    #[test]
+    fn register_instance() {
+        let mut col = ServiceCollection::new();
+        col.register_instance(42);
+        let prov = col.build().unwrap();
+        assert_eq!(Some(42), prov.get());
     }
 }
