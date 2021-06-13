@@ -4,8 +4,7 @@ use {
 };
 
 /// Represents anything resolvable by a ServiceProvider. This
-pub trait Resolvable: Any + SealedResolvable {
-}
+pub trait Resolvable: Any + SealedResolvable {}
 
 pub trait SealedResolvable {
     /// Used if it's uncertain, wether a type is initializable, e.g.
@@ -182,7 +181,8 @@ impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> SealedResol
 }
 impl<T0: Resolvable, T1: Resolvable, T2: Resolvable, T3: Resolvable> Resolvable
     for (T0, T1, T2, T3)
-{}
+{
+}
 
 impl SealedResolvable for WeakServiceProvider {
     // Doesn't make sense to call from the outside
@@ -325,7 +325,6 @@ impl<T: Any> SealedResolvable for AllRegistered<T> {
     }
 }
 impl<T: Any> Resolvable for AllRegistered<T> {}
-
 
 impl<T: Any> SealedResolvable for Registered<T> {
     type Item = Option<T>;

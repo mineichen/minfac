@@ -22,7 +22,7 @@ use {
 /// assert_eq!(Some(1i64), provider1.get::<i64>());
 /// assert_eq!(Some(2i64), provider2.get::<i64>());
 /// ```
-pub struct ServiceProviderFactory<T: Any + Clone +  Send + Sync> {
+pub struct ServiceProviderFactory<T: Any + Clone + Send + Sync> {
     service_states_count: usize,
     immutable_state: Arc<ServiceProviderImmutableState>,
     anticipated: PhantomData<T>,
@@ -60,13 +60,11 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
                     .immutable_state
                     .producers
                     .iter()
-                    .map(move |parent_producer| {
+                    .zip(parent.0.immutable_state.types.iter())
+                    .map(move |(parent_producer, parent_type)| {
                         // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
                         let factory = unsafe { parent_producer.bind(&parent.0) };
-                        ServiceProducer::new_with_type(
-                            Box::new(move |_| Ok(factory)),
-                            *parent_producer.get_result_type_id(),
-                        )
+                        ServiceProducer::new_with_type(Box::new(move |_| Ok(factory)), *parent_type)
                     })
             })
             .collect();
@@ -84,11 +82,12 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
 
-        let (producers, service_states_count) =
+        let (producers, types, service_states_count) =
             collection.validate_producers(parent_service_factories)?;
 
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
+            types,
             _parents: parents,
         });
 
@@ -175,14 +174,8 @@ mod tests {
             .with_parent(&parent)
             .build_factory::<i64>()
             .unwrap();
-        let child1_value = child_factory
-            .build(1)
-            .get::<Box<Arc<AtomicI32>>>()
-            .unwrap();
-        let child2_value = child_factory
-            .build(2)
-            .get::<Arc<AtomicI32>>()
-            .unwrap();
+        let child1_value = child_factory.build(1).get::<Box<Arc<AtomicI32>>>().unwrap();
+        let child2_value = child_factory.build(2).get::<Arc<AtomicI32>>().unwrap();
         child1_value.fetch_add(1, Ordering::Relaxed);
         assert_eq!(43, child2_value.load(Ordering::Relaxed));
     }
@@ -195,22 +188,19 @@ mod tests {
             .register_shared(|s| Arc::new(s as i64));
         let factory = collection.build_factory().unwrap();
         let provider1 = factory.build(1);
-        
 
-        std::thread::spawn(move || { 
-            assert_eq!(
-                Some(Arc::new(1i64)),
-                provider1.get::<Arc<i64>>()                
-            );
-        }).join().unwrap();
+        std::thread::spawn(move || {
+            assert_eq!(Some(Arc::new(1i64)), provider1.get::<Arc<i64>>());
+        })
+        .join()
+        .unwrap();
 
-        std::thread::spawn(move|| { 
+        std::thread::spawn(move || {
             let provider2 = factory.build(2);
-            assert_eq!(
-                Some(Arc::new(2i64)),
-                provider2.get::<Arc<i64>>()
-            );
-        }).join().unwrap();
+            assert_eq!(Some(Arc::new(2i64)), provider2.get::<Arc<i64>>());
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]

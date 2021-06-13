@@ -57,9 +57,8 @@ mod resolvable;
 mod service_provider_factory;
 mod untyped;
 
-
-pub use service_provider_factory::ServiceProviderFactory;
 pub use resolvable::Resolvable;
+pub use service_provider_factory::ServiceProviderFactory;
 
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
@@ -189,11 +188,13 @@ impl ServiceCollection {
     /// let provider = collection.build().expect("Dependencies are ok");
     /// assert_eq!(Some(42 * 4), provider.get::<u128>());
     /// ```
-    pub fn with<T: Resolvable>(&mut self) -> private::ServiceBuilder<'_, T> {
-        private::ServiceBuilder(self, PhantomData)
+    pub fn with<T: Resolvable>(&mut self) -> ServiceBuilder<'_, T> {
+        ServiceBuilder(self, PhantomData)
     }
 
-    pub fn register_instance<T: Clone + 'static>(&mut self, instance: T) {
+    /// Register an instance to be resolvable
+    /// If a ServiceProviderFactory is used, all ServicesProviders will clone from the same origin
+    pub fn register_instance<T: Clone + 'static + Send + Sync>(&mut self, instance: T) {
         let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |_: &ServiceProvider| instance.clone());
@@ -237,10 +238,11 @@ impl ServiceCollection {
     /// Checks, if all dependencies of registered services are available.
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider, BuildError> {
-        let (producers, service_states_count) = self.validate_producers(Vec::new())?;
+        let (producers, types, service_states_count) = self.validate_producers(Vec::new())?;
         let shared_services = vec![OnceCell::new(); service_states_count];
         let immutable_state = Arc::new(ServiceProviderImmutableState {
             producers,
+            types,
             _parents: Vec::new(),
         });
         Ok(ServiceProvider {
@@ -261,18 +263,23 @@ impl ServiceCollection {
     ///
     /// Unlike shared services, this service's reference counter isn't checked to equal zero when the provider is dropped
     ///
-    pub fn build_factory<T: Clone + Any + Send + Sync>(self) -> Result<ServiceProviderFactory<T>, BuildError> {
+    pub fn build_factory<T: Clone + Any + Send + Sync>(
+        self,
+    ) -> Result<ServiceProviderFactory<T>, BuildError> {
         ServiceProviderFactory::create(self, Vec::new())
     }
 
-    pub fn with_parent(self, provider: &ServiceProvider) -> ServiceProviderFactoryBuilder {
+    pub fn with_parent(
+        self,
+        provider: impl Into<WeakServiceProvider>,
+    ) -> ServiceProviderFactoryBuilder {
         ServiceProviderFactoryBuilder::create(self, provider.into())
     }
 
     fn validate_producers(
         self,
         mut factories: Vec<ServiceProducer>,
-    ) -> Result<(Vec<UntypedFn>, usize), BuildError> {
+    ) -> Result<(Vec<UntypedFn>, Vec<TypeId>, usize), BuildError> {
         let mut state_counter: usize = 0;
         factories.extend(self.producer_factories.into_iter());
 
@@ -282,6 +289,7 @@ impl ServiceCollection {
 
         let mut cyclic_reference_candidates = BTreeMap::new();
         let mut producers = Vec::with_capacity(factories.len());
+        let mut types = Vec::with_capacity(factories.len());
 
         for (i, x) in factories.into_iter().enumerate() {
             let mut ctx = UntypedFnFactoryContext {
@@ -293,6 +301,7 @@ impl ServiceCollection {
             let producer = (x.factory)(&mut ctx)?;
             debug_assert_eq!(&x.type_id, producer.get_result_type_id());
             producers.push(producer);
+            types.push(x.type_id);
         }
 
         CycleChecker(&mut cyclic_reference_candidates)
@@ -320,7 +329,7 @@ impl ServiceCollection {
                 )
             })?;
 
-        Ok((producers, state_counter))
+        Ok((producers, types, state_counter))
     }
 }
 
@@ -386,54 +395,52 @@ impl MissingDependencyType {
     }
 }
 
-mod private {
-    pub struct ServiceBuilder<'col, T: super::Resolvable>(
-        pub &'col mut super::ServiceCollection,
-        pub core::marker::PhantomData<T>,
-    );
-    impl<'col, TDep: super::Resolvable> ServiceBuilder<'col, TDep> {
-        pub fn register<T: core::any::Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
-            let factory: super::UntypedFnFactory = Box::new(move |ctx| {
-                let key = TDep::precheck(ctx.final_ordered_types)?;
-                ctx.register_cyclic_reference_candidate(
-                    core::any::type_name::<TDep::ItemPreChecked>(),
-                    Box::new(TDep::iter_positions(ctx.final_ordered_types)),
-                );
-                let func: Box<dyn Fn(&super::ServiceProvider) -> T> =
-                    Box::new(move |provider: &super::ServiceProvider| {
-                        let arg = TDep::resolve_prechecked(provider, &key);
-                        creator(arg)
-                    });
-                Ok(func.into())
-            });
-            self.0
-                .producer_factories
-                .push(super::ServiceProducer::new::<T>(factory));
-        }
-        pub fn register_shared<T: core::any::Any + ?Sized + Send + Sync>(
-            &mut self,
-            creator: fn(TDep::ItemPreChecked) -> alloc::sync::Arc<T>,
-        ) {
-            let factory: super::UntypedFnFactory = Box::new(move |ctx| {
-                let service_state_idx = ctx.reserve_state_space();
-                let key = TDep::precheck(ctx.final_ordered_types)?;
-                ctx.register_cyclic_reference_candidate(
-                    core::any::type_name::<TDep::ItemPreChecked>(),
-                    Box::new(TDep::iter_positions(ctx.final_ordered_types)),
-                );
-                let func: Box<dyn Fn(&super::ServiceProvider) -> alloc::sync::Arc<T>> =
-                    Box::new(move |provider: &super::ServiceProvider| {
-                        let moved_key = &key;
-                        provider.get_or_initialize_pos(service_state_idx, move || {
-                            creator(TDep::resolve_prechecked(provider, &moved_key))
-                        })
-                    });
-                Ok(func.into())
-            });
-            self.0
-                .producer_factories
-                .push(super::ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
-        }
+pub struct ServiceBuilder<'col, T: Resolvable>(
+    pub &'col mut ServiceCollection,
+    core::marker::PhantomData<T>,
+);
+impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
+    pub fn register<T: core::any::Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
+        let factory: UntypedFnFactory = Box::new(move |ctx| {
+            let key = TDep::precheck(ctx.final_ordered_types)?;
+            ctx.register_cyclic_reference_candidate(
+                core::any::type_name::<TDep::ItemPreChecked>(),
+                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+            );
+            let func: Box<dyn Fn(&ServiceProvider) -> T> =
+                Box::new(move |provider: &ServiceProvider| {
+                    let arg = TDep::resolve_prechecked(provider, &key);
+                    creator(arg)
+                });
+            Ok(func.into())
+        });
+        self.0
+            .producer_factories
+            .push(ServiceProducer::new::<T>(factory));
+    }
+    pub fn register_shared<T: core::any::Any + ?Sized + Send + Sync>(
+        &mut self,
+        creator: fn(TDep::ItemPreChecked) -> alloc::sync::Arc<T>,
+    ) {
+        let factory: UntypedFnFactory = Box::new(move |ctx| {
+            let service_state_idx = ctx.reserve_state_space();
+            let key = TDep::precheck(ctx.final_ordered_types)?;
+            ctx.register_cyclic_reference_candidate(
+                core::any::type_name::<TDep::ItemPreChecked>(),
+                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+            );
+            let func: Box<dyn Fn(&ServiceProvider) -> alloc::sync::Arc<T>> =
+                Box::new(move |provider: &ServiceProvider| {
+                    let moved_key = &key;
+                    provider.get_or_initialize_pos(service_state_idx, move || {
+                        creator(TDep::resolve_prechecked(provider, &moved_key))
+                    })
+                });
+            Ok(func.into())
+        });
+        self.0
+            .producer_factories
+            .push(ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
     }
 }
 
@@ -510,8 +517,14 @@ impl Drop for ServiceProvider {
 }
 
 impl ServiceProvider {
-    pub fn resolve<T: Resolvable>(&self) -> T::Item {
+    fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(self)
+    }
+
+    pub fn resolve_unchecked<T: Resolvable>(&self) -> T::ItemPreChecked {
+        let precheck_key =
+            T::precheck(&self.immutable_state.types).expect("Resolve unkwnown service");
+        T::resolve_prechecked(self, &precheck_key)
     }
 
     pub fn get<T: Any>(&self) -> Option<T> {
@@ -541,17 +554,34 @@ impl ServiceProvider {
 pub struct WeakServiceProvider(ServiceProvider);
 
 impl WeakServiceProvider {
-    pub fn resolve<T: Resolvable>(&self) -> T::Item {
+    fn resolve<T: Resolvable>(&self) -> T::Item {
         T::resolve(&self.0)
     }
-    
+
+    pub fn resolve_unchecked<T: Resolvable>(&self) -> T::ItemPreChecked {
+        let precheck_key =
+            T::precheck(&self.0.immutable_state.types).expect("Resolve unkwnown service");
+        T::resolve_prechecked(&self.0, &precheck_key)
+    }
+
     pub fn get<T: Any>(&self) -> Option<T> {
         self.resolve::<Registered<T>>()
     }
 
     pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
         self.resolve::<AllRegistered<T>>()
-    }    
+    }
+}
+
+impl Clone for WeakServiceProvider {
+    fn clone(&self) -> Self {
+        Self(ServiceProvider {
+            immutable_state: self.0.immutable_state.clone(),
+            service_states: self.0.service_states.clone(),
+            #[cfg(debug_assertions)]
+            is_root: false,
+        })
+    }
 }
 
 impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
@@ -566,6 +596,7 @@ impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
 }
 
 struct ServiceProviderImmutableState {
+    types: Vec<TypeId>,
     producers: Vec<UntypedFn>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
     _parents: Vec<WeakServiceProvider>,
@@ -578,6 +609,7 @@ struct ServiceProviderMutableState {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
 
     use {
         super::*,
@@ -791,10 +823,7 @@ mod tests {
         assert_eq!(3, provider.get_all::<Arc<i32>>().count());
 
         // Last
-        assert_eq!(
-            2,
-            *provider.get_all::<Arc<i32>>().last().unwrap()
-        );
+        assert_eq!(2, *provider.get_all::<Arc<i32>>().last().unwrap());
 
         let mut sub = provider.get_all::<Arc<i32>>();
         sub.next();
@@ -821,9 +850,7 @@ mod tests {
             .expect("Expected to have all dependencies");
         assert_eq!(
             provider.get::<i32>(),
-            provider
-                .get::<Arc<i32>>()
-                .map(|f| *f)
+            provider.get::<Arc<i32>>().map(|f| *f)
         );
     }
 

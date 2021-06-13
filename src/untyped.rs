@@ -6,7 +6,7 @@ use {
 
 #[derive(Clone)]
 pub struct UntypedFn {
-    result_type_id: TypeId,
+    result_type_id: TypeId, // Todo: Debug only
     pointer: *mut dyn Fn(),
     wrapper_creator: unsafe fn(*const UntypedFn, *const ServiceProvider) -> UntypedFn,
 }
@@ -15,6 +15,7 @@ unsafe impl Send for UntypedFn {}
 unsafe impl Sync for UntypedFn {}
 
 impl UntypedFn {
+    // Todo: Debug only
     pub fn get_result_type_id(&self) -> &TypeId {
         &self.result_type_id
     }
