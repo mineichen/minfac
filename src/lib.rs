@@ -14,9 +14,9 @@
 //! # Features
 //! - Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
 //! - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
-//! - No wasteful reference counting. Transient services are retrieved as `T`, SharedServices as `Arc<T>`
-//! - Inheritance (one ServiceProvider can inherit services from other ServiceProviders) as an alternative to scoped services
-//! - Service discovery, e.g. `provider.get_all::<i32>()` returns a lazy iterator over all registered i32
+//! - Transient services are retrieved as `T` without any additional frills, SharedServices as `Arc<T>`
+//! - Inheritance instead of scoped services (Service requests can be delegated to parent `ServiceProvider`s)
+//! - Service discovery (`provider.get_all::<MyService>()` returns an iterator, which lazily generates all registered `MyService` instances)
 //! - Fail fast. When building a `ServiceProvider` all registered services are checked to
 //!   - have all dependencies
 //!   - contain no dependency-cycles
@@ -102,6 +102,16 @@ pub struct AllRegistered<T: Any>(PhantomData<T>);
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
 pub struct ServiceCollection {
     producer_factories: Vec<ServiceProducer>,
+}
+
+
+pub struct AliasBuilder<'a, T: ?Sized>(&'a mut ServiceCollection, PhantomData<T>);
+
+impl<'a, T: Any> AliasBuilder<'a, T> {
+    pub fn alias<TNew: Any>(self, creator: fn(T) -> TNew) {
+        self.0.with::<Registered<T>>()
+            .register(creator);
+    }
 }
 
 struct ServiceProducer {
@@ -206,7 +216,7 @@ impl ServiceCollection {
 
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register<T: Any>(&mut self, creator: fn() -> T) {
+    pub fn register<'a, T: Any>(&'a mut self, creator: fn() -> T) -> AliasBuilder<'a, T> {
         let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |_: &ServiceProvider| creator());
@@ -214,6 +224,7 @@ impl ServiceCollection {
         });
         self.producer_factories
             .push(ServiceProducer::new::<T>(factory));
+        AliasBuilder(self, PhantomData)
     }
 
     /// Registers a shared service without dependencies.
@@ -221,7 +232,7 @@ impl ServiceCollection {
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent service leaking in std.
-    pub fn register_shared<T: Any + ?Sized + Send + Sync>(&mut self, creator: fn() -> Arc<T>) {
+    pub fn register_shared<'a, T: Any + Send + Sync>(&'a mut self, creator: fn() -> Arc<T>) -> AliasBuilder<'a, Arc<T>> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
 
@@ -233,6 +244,8 @@ impl ServiceCollection {
         });
         self.producer_factories
             .push(ServiceProducer::new::<Arc<T>>(factory));
+            
+        AliasBuilder(self, PhantomData)
     }
 
     /// Checks, if all dependencies of registered services are available.
@@ -397,10 +410,12 @@ impl MissingDependencyType {
 
 pub struct ServiceBuilder<'col, T: Resolvable>(
     pub &'col mut ServiceCollection,
-    core::marker::PhantomData<T>,
+    PhantomData<T>,
 );
+
+
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
-    pub fn register<T: core::any::Any>(&mut self, creator: fn(TDep::ItemPreChecked) -> T) {
+    pub fn register<'a, T: core::any::Any>(&'a mut self, creator: fn(TDep::ItemPreChecked) -> T) -> AliasBuilder<'a, T> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
@@ -417,11 +432,13 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         self.0
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
+
+        AliasBuilder(&mut self.0, PhantomData)
     }
-    pub fn register_shared<T: core::any::Any + ?Sized + Send + Sync>(
-        &mut self,
+    pub fn register_shared<'a, T: core::any::Any + Send + Sync>(
+        &'a mut self,
         creator: fn(TDep::ItemPreChecked) -> alloc::sync::Arc<T>,
-    ) {
+    ) -> AliasBuilder<Arc<T>> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
             let key = TDep::precheck(ctx.final_ordered_types)?;
@@ -441,6 +458,8 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
         self.0
             .producer_factories
             .push(ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
+
+        AliasBuilder(&mut self.0, PhantomData)
     }
 }
 
@@ -534,7 +553,7 @@ impl ServiceProvider {
         self.resolve::<AllRegistered<T>>()
     }
 
-    fn get_or_initialize_pos<T: Any + ?Sized + Send + Sync, TFn: Fn() -> Arc<T>>(
+    fn get_or_initialize_pos<T: Any + Send + Sync, TFn: Fn() -> Arc<T>>(
         &self,
         index: usize,
         initializer: TFn,
@@ -609,7 +628,6 @@ struct ServiceProviderMutableState {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
 
     use {
         super::*,
@@ -932,7 +950,8 @@ mod tests {
         collection.register_shared(|| Arc::new(42i32));
         collection
             .with::<Registered<Arc<i32>>>()
-            .register_shared(|i| Arc::new(ServiceImpl(i)) as Arc<dyn Service + Send + Sync>);
+            .register_shared(|i| Arc::new(ServiceImpl(i)))
+            .alias(|a| a as Arc<dyn Service + Send + Sync>);
         let provider = collection
             .build()
             .expect("Expected to have all dependencies");
