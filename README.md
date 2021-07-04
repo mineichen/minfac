@@ -1,5 +1,5 @@
 # Lightweight Inversion of control
-```
+``` rust
 use {ioc_rs::{Registered, ServiceCollection}};
 let mut collection = ServiceCollection::new();
 collection
