@@ -108,9 +108,10 @@ pub struct ServiceCollection {
 pub struct AliasBuilder<'a, T: ?Sized>(&'a mut ServiceCollection, PhantomData<T>);
 
 impl<'a, T: Any> AliasBuilder<'a, T> {
-    pub fn alias<TNew: Any>(self, creator: fn(T) -> TNew) {
+    pub fn alias<TNew: Any>(self, creator: fn(T) -> TNew) -> Self {
         self.0.with::<Registered<T>>()
             .register(creator);
+        self
     }
 }
 
