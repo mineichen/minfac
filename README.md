@@ -1,12 +1,14 @@
 # Lightweight Inversion of control
-```
+``` rust
 use {ioc_rs::{Registered, ServiceCollection}};
+
 let mut collection = ServiceCollection::new();
 collection
     .with::<Registered<u8>>()
     .register(|byte| byte as i16 * 2);
 collection.register(|| 1u8);
 let provider = collection.build().expect("Configuration is valid");
+
 assert_eq!(Some(2i16), provider.get::<i16>());
 
 ```
