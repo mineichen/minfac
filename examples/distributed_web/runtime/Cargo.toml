@@ -1,0 +1,14 @@
+[package]
+name = "runtime"
+version = "0.0.1"
+authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+futures = "0.3"
+tokio = {version = "1.5", features = ["full"]}
+ioc-rs = { path = "../../../" }
+raf_hosted_service = { path = "../raf-hosted-service" } 
+raf_web = { path = "../raf-web" } 
+raf_sql = { path = "../raf-sql", features = ["service"] }
+libloading = "0.7"

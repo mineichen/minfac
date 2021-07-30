@@ -1,0 +1,18 @@
+[package]
+name = "raf_web"
+version = "0.0.1"
+authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+bytes = "1.0.1"
+futures = "0.3"
+ioc-rs = { path = "../../../" }
+raf_hosted_service = { path = "../raf-hosted-service" } 
+hyper = { version = "0.14.8", features = ["full"] }
+reset-recognizer = "0.8.0"
+http = "0.2"
+
+[features]
+service = []

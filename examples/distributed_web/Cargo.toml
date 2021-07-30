@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+    "raf-hosted-service",
+    "raf-web",
+    "raf-sql",
+    "runtime",
+    "todo",
+]
