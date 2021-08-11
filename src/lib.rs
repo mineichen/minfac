@@ -395,6 +395,7 @@ impl BuildError {
     }
 }
 
+#[doc(hidden)]
 pub struct ServiceBuilder<'col, T: Resolvable>(pub &'col mut ServiceCollection, PhantomData<T>);
 
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
