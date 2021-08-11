@@ -245,7 +245,7 @@ mod tests {
         if let Err(BuildError::MissingDependency(infos)) = collection.build_factory::<u32>() {
             assert_eq!(
                 infos,
-                crate::MissingDependencyType {
+                crate::MissingDependencyError {
                     id: core::any::TypeId::of::<Registered<i32>>(),
                     name: "minfac::Registered<i32>"
                 }

@@ -76,7 +76,7 @@ pub struct ServiceCollection {
     producer_factories: Vec<ServiceProducer>,
 }
 
-/// Alias builder is used to register services, which depend on the previous service. 
+/// Alias builder is used to register services, which depend on the previous service.
 /// This is especially useful, if the previous service contains an anonymous type like a lambda
 pub struct AliasBuilder<'a, T: ?Sized>(Rc<RefCell<&'a mut ServiceCollection>>, PhantomData<T>);
 
@@ -313,8 +313,8 @@ impl ServiceCollection {
         CycleChecker(&mut cyclic_reference_candidates)
             .ok()
             .map_err(|indices| {
-                BuildError::CyclicDependency(
-                    indices
+                BuildError::CyclicDependency(CyclicDependencyError {
+                    description: indices
                         .into_iter()
                         .skip(1)
                         .map(|i| {
@@ -332,7 +332,7 @@ impl ServiceCollection {
                                 .to_string(),
                             |acc, n| acc + " -> " + n,
                         ),
-                )
+                })
             })?;
 
         Ok((producers, types, state_counter))
@@ -382,17 +382,24 @@ impl<'a> CycleChecker<'a> {
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuildError {
-    MissingDependency(MissingDependencyType),
-    CyclicDependency(String),
+    MissingDependency(MissingDependencyError),
+    CyclicDependency(CyclicDependencyError),
 }
 
+#[doc(hidden)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct MissingDependencyType {
-    id: TypeId,
-    name: &'static str,
+pub struct MissingDependencyError {
+    pub id: TypeId,
+    pub name: &'static str,
 }
 
-impl MissingDependencyType {
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct CyclicDependencyError {
+    pub description: String,
+}
+
+impl MissingDependencyError {
     fn new<T: Any>() -> Self {
         Self {
             name: type_name::<T>(),
