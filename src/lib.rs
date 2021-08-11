@@ -312,27 +312,25 @@ impl ServiceCollection {
 
         CycleChecker(&mut cyclic_reference_candidates)
             .ok()
-            .map_err(|indices| {
-                BuildError::CyclicDependency(CyclicDependencyError {
-                    description: indices
-                        .into_iter()
-                        .skip(1)
-                        .map(|i| {
-                            cyclic_reference_candidates
-                                .get(&i)
-                                .unwrap()
-                                .type_description
-                        })
-                        .fold(
-                            cyclic_reference_candidates
-                                .values()
-                                .next()
-                                .unwrap()
-                                .type_description
-                                .to_string(),
-                            |acc, n| acc + " -> " + n,
-                        ),
-                })
+            .map_err(|indices| BuildError::CyclicDependency {
+                description: indices
+                    .into_iter()
+                    .skip(1)
+                    .map(|i| {
+                        cyclic_reference_candidates
+                            .get(&i)
+                            .unwrap()
+                            .type_description
+                    })
+                    .fold(
+                        cyclic_reference_candidates
+                            .values()
+                            .next()
+                            .unwrap()
+                            .type_description
+                            .to_string(),
+                        |acc, n| acc + " -> " + n,
+                    ),
             })?;
 
         Ok((producers, types, state_counter))
@@ -382,26 +380,15 @@ impl<'a> CycleChecker<'a> {
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuildError {
-    MissingDependency(MissingDependencyError),
-    CyclicDependency(CyclicDependencyError),
+    #[non_exhaustive]
+    MissingDependency { id: TypeId, name: &'static str },
+    #[non_exhaustive]
+    CyclicDependency { description: String },
 }
 
-#[doc(hidden)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct MissingDependencyError {
-    pub id: TypeId,
-    pub name: &'static str,
-}
-
-#[doc(hidden)]
-#[derive(Debug, PartialEq, Eq)]
-pub struct CyclicDependencyError {
-    pub description: String,
-}
-
-impl MissingDependencyError {
-    fn new<T: Any>() -> Self {
-        Self {
+impl BuildError {
+    fn new_missing_dependency<T: Any>() -> Self {
+        BuildError::MissingDependency {
             name: type_name::<T>(),
             id: TypeId::of::<T>(),
         }
@@ -745,12 +732,12 @@ mod tests {
             match col.build() {
                 Ok(_) => panic!("Build with missing dependency should fail"),
                 Err(e) => match e {
-                    BuildError::MissingDependency(msg) => {
+                    BuildError::MissingDependency { name, .. } => {
                         for part in missing_msg_parts {
                             assert!(
-                                msg.name.contains(part),
+                                name.contains(part),
                                 "Expected '{}' to contain '{}'",
-                                msg.name,
+                                name,
                                 part
                             );
                         }

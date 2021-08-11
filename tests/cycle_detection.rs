@@ -9,7 +9,7 @@ fn handle_cyclic_references() {
 
     let err = col.build().expect_err("Expected to return error");
     let msg = match err {
-        BuildError::CyclicDependency(msg) => msg.description,
+        BuildError::CyclicDependency { description, .. } => description,
         _ => panic!("Expected BuildError::CyclicDependency"),
     };
     assert!(msg.contains("i32 -> i16"));
@@ -26,8 +26,8 @@ fn one_of_multiple_dependencies_asks_for_dependent_should_trigger_cyclic_depende
 
     col.with::<AllRegistered<i32>>().register(|_| 42i64);
     let error = col.build().expect_err("Expected to return error");
-    let msg = if let BuildError::CyclicDependency(msg) = error {
-        msg.description
+    let msg = if let BuildError::CyclicDependency { description, .. } = error {
+        description
     } else {
         panic!("Expected error");
     };

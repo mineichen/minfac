@@ -242,14 +242,9 @@ mod tests {
     fn create_provider_with_factory_fails_for_missing_dependency() {
         let mut collection = ServiceCollection::new();
         collection.with::<Registered<i32>>().register(|s| s as i64);
-        if let Err(BuildError::MissingDependency(infos)) = collection.build_factory::<u32>() {
-            assert_eq!(
-                infos,
-                crate::MissingDependencyError {
-                    id: core::any::TypeId::of::<Registered<i32>>(),
-                    name: "minfac::Registered<i32>"
-                }
-            );
+        if let Err(BuildError::MissingDependency { id, name }) = collection.build_factory::<u32>() {
+            assert_eq!(id, core::any::TypeId::of::<Registered<i32>>());
+            assert_eq!(name, "minfac::Registered<i32>");
         } else {
             panic!("Expected to have missing dependency error");
         }

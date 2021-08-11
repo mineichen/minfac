@@ -350,9 +350,7 @@ impl<T: Any> SealedResolvable for Registered<T> {
 
     fn precheck(producers: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
         binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f)
-            .ok_or_else(|| {
-                BuildError::MissingDependency(super::MissingDependencyError::new::<Self>())
-            })
+            .ok_or_else(|| BuildError::new_missing_dependency::<Self>())
     }
 
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
