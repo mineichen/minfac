@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 futures = "0.3"
 tokio = {version = "1.5", features = ["full"]}
-ioc-rs = { path = "../../../" }
+minfac = { path = "../../../" }
 raf_hosted_service = { path = "../raf-hosted-service" } 
 raf_web = { path = "../raf-web", features = ["service"]  } 
 raf_sql = { path = "../raf-sql", features = ["service"] }

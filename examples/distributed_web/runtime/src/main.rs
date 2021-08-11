@@ -1,5 +1,5 @@
 use futures::future::join_all;
-use ioc_rs::ServiceCollection;
+use minfac::ServiceCollection;
 use libloading::{Library, Symbol};
 use raf_hosted_service::HostedService;
 use std::{
@@ -9,7 +9,7 @@ use std::{
 };
 use tokio;
 
-type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
+type ServiceRegistrar = unsafe extern "C" fn(&mut minfac::ServiceCollection);
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() -> Result<(), Box<dyn Error>> {

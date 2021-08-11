@@ -1,5 +1,5 @@
 use crate::{HandlerResult, ServiceProviderHandler};
-use ioc_rs::ServiceProvider;
+use minfac::ServiceProvider;
 
 pub struct NotFoundHandler(Box<dyn super::ServiceProviderHandler>);
 

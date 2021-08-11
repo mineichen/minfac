@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
-use ioc_rs::{Resolvable, ServiceBuilder, ServiceCollection, ServiceProvider};
+use minfac::{Resolvable, ServiceBuilder, ServiceCollection, ServiceProvider};
 use std::{borrow::Cow, convert::Infallible, pin::Pin, sync::Arc};
 
 pub mod error_pages;

@@ -1,4 +1,4 @@
-use ioc_rs::ServiceCollection;
+use minfac::ServiceCollection;
 
 mod repository;
 mod web;

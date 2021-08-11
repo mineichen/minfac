@@ -147,7 +147,7 @@ impl ServiceCollection {
     /// Generate a ServiceBuilder with `T` as a dependency.
     /// An instance of T is provided as an argument to the factory fn:
     /// ``` rust
-    /// use {ioc_rs::{AllRegistered, Registered, ServiceCollection, ServiceIterator, WeakServiceProvider}};
+    /// use {minfac::{AllRegistered, Registered, ServiceCollection, ServiceIterator, WeakServiceProvider}};
     ///
     /// let mut collection = ServiceCollection::new();
     ///
@@ -436,7 +436,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
 /// to retrieve services by type. ServiceProviders are final and cannot be modified anymore. When a ServiceProvider goes
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
-/// dropping the original ServiceProvider results in a call to ioc-rs::ERROR_HANDLER, which panics in std and enabled debug_assertions
+/// dropping the original ServiceProvider results in a call to minfac::ERROR_HANDLER, which panics in std and enabled debug_assertions
 pub struct ServiceProvider {
     immutable_state: Arc<ServiceProviderImmutableState>,
     service_states: Arc<ServiceProviderMutableState>,
@@ -539,7 +539,7 @@ impl ServiceProvider {
 }
 
 /// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
-/// their original ServiceProvider. If they do, the iocrs::ERROR_HANDLER is called
+/// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called
 pub struct WeakServiceProvider(ServiceProvider);
 
 impl WeakServiceProvider {

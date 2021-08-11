@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 futures = "0.3"
-ioc-rs = { path = "../../../" }
+minfac = { path = "../../../" }
 sqlx = { version = "0.5", features = ["sqlite" ] }
 either = "1.6.1"
 

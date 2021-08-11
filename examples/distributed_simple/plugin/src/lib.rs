@@ -1,5 +1,5 @@
 use {
-    ioc_rs::{Registered, ServiceCollection},
+    minfac::{Registered, ServiceCollection},
     std::sync::Arc,
 };
 struct PluginService;

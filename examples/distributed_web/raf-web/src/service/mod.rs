@@ -5,7 +5,7 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Server,
 };
-use ioc_rs::{AllRegistered, Registered, WeakServiceProvider};
+use minfac::{AllRegistered, Registered, WeakServiceProvider};
 use raf_hosted_service::HostedService;
 use std::net::SocketAddr;
 

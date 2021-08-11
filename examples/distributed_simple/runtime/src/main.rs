@@ -1,11 +1,11 @@
 use {
-    ioc_rs::ServiceCollection,
+    minfac::ServiceCollection,
     std::sync::Arc,
     libloading::{Library, Symbol},
     std::env::consts::{DLL_PREFIX, DLL_SUFFIX}
 };
 
-type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
+type ServiceRegistrar = unsafe extern "C" fn(&mut minfac::ServiceCollection);
 
 ///
 /// # Expected output

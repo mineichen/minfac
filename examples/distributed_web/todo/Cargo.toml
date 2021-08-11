@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 anyhow = "1.0"
 futures = "0.3"
-ioc-rs = { path = "../../../" }
+minfac = { path = "../../../" }
 raf_web = { path = "../raf-web" } 
 raf_sql = { path = "../raf-sql" }
 raf_hosted_service = { path = "../raf-hosted-service" }

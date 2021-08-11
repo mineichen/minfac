@@ -1,7 +1,7 @@
 use crate::TodoItem;
 use anyhow::Result;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
-use ioc_rs::{Registered, ServiceCollection};
+use minfac::{Registered, ServiceCollection};
 use raf_hosted_service::HostedService;
 use raf_sql::{DynConnectionWrapper, DynamicDatabaseExecutorPromise};
 use sqlx::FromRow;

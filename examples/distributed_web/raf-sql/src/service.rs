@@ -3,7 +3,7 @@ use crate::{
     SqliteExecutor,
 };
 use futures::{future::BoxFuture, FutureExt, StreamExt, TryFutureExt};
-use ioc_rs::{Registered, ServiceCollection};
+use minfac::{Registered, ServiceCollection};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 

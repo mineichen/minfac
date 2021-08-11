@@ -1,7 +1,7 @@
 use crate::repository::TodoRepository;
 use anyhow::Result;
 use futures::TryStreamExt;
-use ioc_rs::{Registered, ServiceCollection};
+use minfac::{Registered, ServiceCollection};
 use raf_web::{Response, Route, ServiceCollectionWebExtensions};
 
 pub(crate) fn register_services(collection: &mut ServiceCollection) {

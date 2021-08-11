@@ -1,9 +1,9 @@
 [package]
-name = "ioc-rs"
+name = "minfac"
 version = "0.0.1"
 authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
 description = "Inversion of control inspired by .Net's Microsoft.Extensions.DependencyInjection"
-repository = "https://github.com/mineichen/ioc_rs"
+repository = "https://github.com/mineichen/minfac"
 keywords = ["ioc", "dependency-injection", "dynamic", "inversion-of-control", "di"]
 categories = ["config"]
 readme = "README.md"

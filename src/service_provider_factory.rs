@@ -11,7 +11,7 @@ use {
 /// This base could e.g. be the ApplicationSettings for the DomainServices or the HttpContext, if one ServiceProvider
 /// is generated per HTTP-Request in a WebApi
 /// ```
-/// use {ioc_rs::{Registered, ServiceCollection}};
+/// use {minfac::{Registered, ServiceCollection}};
 ///
 /// let mut collection = ServiceCollection::new();
 /// collection.with::<Registered<i32>>().register(|v| v as i64);
@@ -105,7 +105,7 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     /// # // don't actually run the test, because it fails for "cargo test --release"
     /// # // #[cfg(debug_assertions)] is still enabled for doctest, but not for the actual library
     /// # fn no_op() {
-    /// use {ioc_rs::{Registered, ServiceCollection}, std::sync::Arc};
+    /// use {minfac::{Registered, ServiceCollection}, std::sync::Arc};
     /// let result = std::panic::catch_unwind(|| {
     ///     let mut collection = ServiceCollection::new();
     ///     collection.register_shared(|| Arc::new(42));
@@ -247,7 +247,7 @@ mod tests {
                 infos,
                 crate::MissingDependencyType {
                     id: core::any::TypeId::of::<Registered<i32>>(),
-                    name: "ioc_rs::Registered<i32>"
+                    name: "minfac::Registered<i32>"
                 }
             );
         } else {

@@ -1,4 +1,4 @@
-use ioc_rs::{self, AllRegistered, BuildError, Registered, ServiceCollection};
+use minfac::{self, AllRegistered, BuildError, Registered, ServiceCollection};
 
 #[test]
 fn handle_cyclic_references() {
@@ -31,7 +31,7 @@ fn one_of_multiple_dependencies_asks_for_dependent_should_trigger_cyclic_depende
     } else {
         panic!("Expected error");
     };
-    assert!(msg.contains("ioc_rs::ServiceIterator<ioc_rs::Registered<i32>> ->"));
+    assert!(msg.contains("minfac::ServiceIterator<minfac::Registered<i32>> ->"));
     assert!(msg.contains("i64 ->"));
 }
 

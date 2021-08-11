@@ -1,6 +1,6 @@
 use crate::{error_pages::NotFoundHandler, HandlerFutureResult};
 use http::Response;
-use ioc_rs::ServiceCollection;
+use minfac::ServiceCollection;
 
 pub fn register_services(collection: &mut ServiceCollection) {
     collection.register(|| NotFoundHandler::new(not_found));

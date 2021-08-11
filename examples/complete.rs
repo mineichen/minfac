@@ -2,7 +2,7 @@
 //! If you can understand all assertions, you've seen all aspects of this library
 
 use {
-    ioc_rs::{AllRegistered, Registered, ServiceCollection, WeakServiceProvider},
+    minfac::{AllRegistered, Registered, ServiceCollection, WeakServiceProvider},
     std::sync::Arc,
 };
 
