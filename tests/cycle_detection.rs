@@ -25,10 +25,14 @@ fn one_of_multiple_dependencies_asks_for_dependent_should_trigger_cyclic_depende
     col.register(|| 2i32);
 
     col.with::<AllRegistered<i32>>().register(|_| 42i64);
-    assert_eq!(
-        col.build().expect_err("Expected to return error"),
-        BuildError::CyclicDependency("ioc_rs::ServiceIterator<ioc_rs::Registered<i32>> -> i64 -> ioc_rs::ServiceIterator<ioc_rs::Registered<i32>>".to_owned())
-    );
+    let error = col.build().expect_err("Expected to return error");
+    let msg = if let BuildError::CyclicDependency(msg) = error {
+        msg
+    } else {
+        panic!("Expected error");
+    };
+    assert!(msg.contains("ioc_rs::ServiceIterator<ioc_rs::Registered<i32>> ->"));
+    assert!(msg.contains("i64 ->"));
 }
 
 #[test]
