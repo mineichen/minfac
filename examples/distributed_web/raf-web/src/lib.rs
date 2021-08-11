@@ -5,6 +5,8 @@ use ioc_rs::{Resolvable, ServiceBuilder, ServiceCollection, ServiceProvider};
 use std::{borrow::Cow, convert::Infallible, pin::Pin, sync::Arc};
 
 pub mod error_pages;
+
+#[cfg(feature = "service")]
 pub mod hosted_service;
 
 pub trait ServiceCollectionWebExtensions {

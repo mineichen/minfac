@@ -9,6 +9,7 @@ futures = "0.3"
 tokio = {version = "1.5", features = ["full"]}
 ioc-rs = { path = "../../../" }
 raf_hosted_service = { path = "../raf-hosted-service" } 
-raf_web = { path = "../raf-web" } 
+raf_web = { path = "../raf-web", features = ["service"]  } 
 raf_sql = { path = "../raf-sql", features = ["service"] }
+#todo = { path = "../todo" }
 libloading = "0.7"
