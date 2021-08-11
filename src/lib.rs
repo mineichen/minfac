@@ -6,6 +6,7 @@ use {
     alloc::{
         boxed::Box,
         collections::BTreeMap,
+        rc::Rc,
         string::{String, ToString},
         sync::Arc,
         vec,
@@ -25,6 +26,8 @@ mod binary_search;
 mod resolvable;
 mod service_provider_factory;
 mod untyped;
+
+use core::cell::RefCell;
 
 pub use resolvable::Resolvable;
 pub use service_provider_factory::ServiceProviderFactory;
@@ -73,14 +76,31 @@ pub struct ServiceCollection {
     producer_factories: Vec<ServiceProducer>,
 }
 
-
-pub struct AliasBuilder<'a, T: ?Sized>(&'a mut ServiceCollection, PhantomData<T>);
+/// Alias builder is used to register services, which depend on the previous service. 
+/// This is especially useful, if the previous service contains an anonymous type like a lambda
+pub struct AliasBuilder<'a, T: ?Sized>(Rc<RefCell<&'a mut ServiceCollection>>, PhantomData<T>);
 
 impl<'a, T: Any> AliasBuilder<'a, T> {
-    pub fn alias<TNew: Any>(self, creator: fn(T) -> TNew) -> Self {
-        self.0.with::<Registered<T>>()
+    fn new(col: &'a mut ServiceCollection) -> Self {
+        AliasBuilder(Rc::new(RefCell::new(col)), PhantomData)
+    }
+
+    /// Registers an aliased service. The returned AliasBuilder refers to the new type
+    /// ``` rust
+    /// let mut col = minfac::ServiceCollection::new();
+    /// let mut i8alias = col.register(|| 1i8)
+    ///     .alias(|a| a as i16 * 2)
+    ///     .alias(|a| a as i32 * 2);
+    /// let prov = col.build().unwrap();
+    /// assert_eq!(Some(2i16), prov.get());
+    /// assert_eq!(Some(4i32), prov.get());
+    /// ```
+    pub fn alias<TNew: Any>(&mut self, creator: fn(T) -> TNew) -> AliasBuilder<'a, TNew> {
+        self.0
+            .borrow_mut()
+            .with::<Registered<T>>()
             .register(creator);
-        self
+        AliasBuilder(self.0.clone(), PhantomData)
     }
 }
 
@@ -194,7 +214,7 @@ impl ServiceCollection {
         });
         self.producer_factories
             .push(ServiceProducer::new::<T>(factory));
-        AliasBuilder(self, PhantomData)
+        AliasBuilder::new(self)
     }
 
     /// Registers a shared service without dependencies.
@@ -202,7 +222,10 @@ impl ServiceCollection {
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent service leaking in std.
-    pub fn register_shared<'a, T: Any + Send + Sync>(&'a mut self, creator: fn() -> Arc<T>) -> AliasBuilder<'a, Arc<T>> {
+    pub fn register_shared<'a, T: Any + Send + Sync>(
+        &'a mut self,
+        creator: fn() -> Arc<T>,
+    ) -> AliasBuilder<'a, Arc<T>> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
 
@@ -214,8 +237,8 @@ impl ServiceCollection {
         });
         self.producer_factories
             .push(ServiceProducer::new::<Arc<T>>(factory));
-            
-        AliasBuilder(self, PhantomData)
+
+        AliasBuilder::new(self)
     }
 
     /// Checks, if all dependencies of registered services are available.
@@ -378,14 +401,13 @@ impl MissingDependencyType {
     }
 }
 
-pub struct ServiceBuilder<'col, T: Resolvable>(
-    pub &'col mut ServiceCollection,
-    PhantomData<T>,
-);
-
+pub struct ServiceBuilder<'col, T: Resolvable>(pub &'col mut ServiceCollection, PhantomData<T>);
 
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
-    pub fn register<'a, T: core::any::Any>(&'a mut self, creator: fn(TDep::ItemPreChecked) -> T) -> AliasBuilder<'a, T> {
+    pub fn register<'a, T: core::any::Any>(
+        &'a mut self,
+        creator: fn(TDep::ItemPreChecked) -> T,
+    ) -> AliasBuilder<'a, T> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
@@ -403,7 +425,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
 
-        AliasBuilder(&mut self.0, PhantomData)
+        AliasBuilder::new(&mut self.0)
     }
     pub fn register_shared<'a, T: core::any::Any + Send + Sync>(
         &'a mut self,
@@ -429,7 +451,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
 
-        AliasBuilder(&mut self.0, PhantomData)
+        AliasBuilder::new(&mut self.0)
     }
 }
 
@@ -976,5 +998,18 @@ mod tests {
         col.register_instance(42);
         let prov = col.build().unwrap();
         assert_eq!(Some(42), prov.get());
+    }
+
+    #[test]
+    fn register_multiple_alias_per_type() {
+        let mut col = ServiceCollection::new();
+        let mut i8alias = col.register(|| 1i8);
+        let mut i16alias = i8alias.alias(|a| a as i16 * 2);
+        i8alias.alias(|a| a as i32 * 2);
+        i16alias.alias(|a| a as i64 * 2);
+
+        let prov = col.build().unwrap();
+        assert_eq!(Some(2i32), prov.get());
+        assert_eq!(Some(4i64), prov.get());
     }
 }

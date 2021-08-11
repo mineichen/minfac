@@ -2,7 +2,7 @@
 name = "minfac"
 version = "0.0.1"
 authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
-description = "Inversion of control inspired by .Net's Microsoft.Extensions.DependencyInjection"
+description = "Lightweight Inversion Of Control"
 repository = "https://github.com/mineichen/minfac"
 keywords = ["ioc", "dependency-injection", "dynamic", "inversion-of-control", "di"]
 categories = ["config"]

@@ -1,4 +1,4 @@
-# Lightweight Inversion of control
+# Lightweight Inversion Of Control
 ``` rust
 use {minfac::{Registered, ServiceCollection}};
 
