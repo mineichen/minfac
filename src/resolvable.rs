@@ -3,7 +3,7 @@ use {
     core::iter::{Chain, Empty},
 };
 
-/// Represents anything resolvable by a ServiceProvider. This
+/// Represents anything resolvable by a ServiceProvider.
 pub trait Resolvable: Any + SealedResolvable {}
 
 pub trait SealedResolvable {
