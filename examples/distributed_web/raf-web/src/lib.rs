@@ -7,7 +7,7 @@ use std::{borrow::Cow, convert::Infallible, pin::Pin, sync::Arc};
 pub mod error_pages;
 
 #[cfg(feature = "service")]
-pub mod hosted_service;
+pub mod service;
 
 pub trait ServiceCollectionWebExtensions {
     type Dependency: Send;

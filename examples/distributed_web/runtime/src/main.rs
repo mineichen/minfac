@@ -8,7 +8,6 @@ use std::{
     error::Error,
 };
 use tokio;
-mod platform;
 
 type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
 
@@ -16,8 +15,7 @@ type ServiceRegistrar = unsafe extern "C" fn(&mut ioc_rs::ServiceCollection);
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut collection = ServiceCollection::new();
 
-    platform::register_services(&mut collection);
-    raf_web::hosted_service::register_services(&mut collection);
+    raf_web::service::register_services(&mut collection);
     raf_sql::service::register(&mut collection);
 
     // Lib must be referenced outside of unsafe block, because it's dropped otherwise, sporadically resulting in a segfault
