@@ -1,3 +1,4 @@
+use futures::lock::Mutex;
 use super::{error_pages::NotFoundHandler, *};
 use anyhow::Result;
 use futures::future::BoxFuture;
@@ -23,12 +24,24 @@ pub fn register_services(collection: &mut ServiceCollection) {
     error_pages::register_services(collection);
 }
 
+impl From<crate::body::Body> for hyper::Body {
+    fn from(input: crate::body::Body) -> Self {
+        match input.kind {
+            crate::body::Kind::Once(maybe_x) => match maybe_x {
+                Some(x) => hyper::Body::from(x),
+                None => hyper::Body::empty(),
+            },
+            crate::body::Kind::Wrapped(x) => hyper::Body::from(x),
+        }
+    }
+}
+
 struct HostedServer {
     provider: WeakServiceProvider,
     routes: Vec<ServiceProviderRoute>,
 }
 
-type WebProviderRemainer = (Route, Arc<Request>);
+type WebProviderRemainer = (Route/*, Arc<Mutex<Request>>*/);
 
 impl HostedService for HostedServer {
     fn start(self: Box<Self>) -> BoxFuture<'static, Result<()>> {
@@ -38,10 +51,10 @@ impl HostedService for HostedServer {
         web_collection
             .with::<Registered<WebProviderRemainer>>()
             .register(|r| r.0);
-
+        /*
         web_collection
             .with::<Registered<WebProviderRemainer>>()
-            .register(|r| r.1);
+            .register(|r| r.1);*/
 
         for route in self.routes.iter() {
             route.handler.register_dummy_dependency(&mut web_collection);
@@ -73,18 +86,19 @@ impl HostedService for HostedServer {
                 async {
                     Ok::<_, Infallible>(service_fn(move |req| {
                         dbg!(req.uri().path());
+                        //let wrap_req = Arc::new(Mutex::new(req.into()));
+
                         match local_routes.recognize(req.uri().path()) {
                             Ok(route) => {
-                                println!("Request: {:?}", req.body());
-                                let provider = local_factory
-                                    .build((Route(Some(Arc::new(route.captures))), Arc::new(req)));
-                                route.handler.call(provider)
+                                //println!("Request: {:?}", req.body().into::<hyper::Body>());
+                                let dependency = (Route(Some(Arc::new(route.captures)))/*, wrap_req*/);
+                                let provider = local_factory.build(dependency);
+                                to_hyper_response(route.handler.call(provider))
                             }
                             _ => {
-                                let provider = local_factory.build((Route(None), Arc::new(req)));
-                                let handler =
-                                    provider.resolve_unchecked::<Registered<NotFoundHandler>>();
-                                handler.call(provider)
+                                let provider = local_factory.build((Route(None)/*, wrap_req*/));
+                                let handler = provider.resolve_unchecked::<Registered<NotFoundHandler>>();
+                                to_hyper_response(handler.call(provider))
                             }
                         }
                     }))
@@ -101,4 +115,16 @@ impl HostedService for HostedServer {
         }
         .boxed()
     }
+}
+
+fn to_hyper_response(
+    input: HandlerResult,
+) -> impl Future<Output = Result<hyper::Response<hyper::Body>>> {
+    input.map(|result| {
+        result.map(|response| {
+            let (part, body) = response.into_parts();
+            let hyper_body: hyper::Body = body.into();
+            hyper::Response::from_parts(part, hyper_body)
+        })
+    })
 }

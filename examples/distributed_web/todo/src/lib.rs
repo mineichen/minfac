@@ -11,7 +11,7 @@ pub struct TodoItem {
 
 #[no_mangle]
 pub extern "C" fn register(collection: &mut ServiceCollection) {
-    println!("Register tod");
+    println!("Register todo");
     repository::register_services(collection);
     web::register_services(collection);
 }

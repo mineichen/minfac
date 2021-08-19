@@ -4,6 +4,7 @@ use futures::{Future, FutureExt};
 use minfac::{Resolvable, ServiceBuilder, ServiceCollection, ServiceProvider};
 use std::{borrow::Cow, convert::Infallible, pin::Pin, sync::Arc};
 
+pub mod body;
 pub mod error_pages;
 
 #[cfg(feature = "service")]
@@ -32,14 +33,10 @@ impl Route {
     }
 }
 
-pub type Request = http::Request<hyper::Body>;
-pub type Response = http::Response<hyper::Body>;
+pub type Request = http::Request<body::Body>;
+pub type Response = http::Response<body::Body>;
 type HandlerResult = Pin<Box<dyn Future<Output = HandlerFutureResult> + Send>>;
 type HandlerFutureResult = Result<Response>;
-
-pub enum Body {
-    Once(Option<Bytes>),
-}
 
 impl<'col, TDep> ServiceCollectionWebExtensions for ServiceBuilder<'col, TDep>
 where
