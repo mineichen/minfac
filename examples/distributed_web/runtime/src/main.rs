@@ -1,7 +1,7 @@
 use futures::future::join_all;
-use minfac::ServiceCollection;
 use libloading::{Library, Symbol};
-use raf_hosted_service::HostedService;
+use minfac::ServiceCollection;
+use raf_core::HostedService;
 use std::{
     array::IntoIter,
     env::consts::{DLL_PREFIX, DLL_SUFFIX},

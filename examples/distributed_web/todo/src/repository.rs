@@ -2,7 +2,7 @@ use crate::TodoItem;
 use anyhow::Result;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
 use minfac::{Registered, ServiceCollection};
-use raf_hosted_service::HostedService;
+use raf_core::HostedService;
 use raf_sql::{DynConnectionWrapper, DynamicDatabaseExecutorPromise};
 use sqlx::FromRow;
 use std::sync::Arc;
@@ -62,13 +62,7 @@ impl TodoRepository for SqlTodoRepository {
                 .fetch_many(sqlx::query("SELECT * FROM todo"))
                 .try_filter_map(|f| async move {
                     match f.right() {
-                        Some(x) => {
-                            let item = SqlTodoItem::from_row(&x)?;
-                            Ok(Some(TodoItem {
-                                id: item.id,
-                                title: item.title,
-                            }))
-                        }
+                        Some(x) => Ok(Some(SqlTodoItem::from_row(&x)?.into())),
                         None => Ok(None),
                     }
                 })
@@ -106,20 +100,6 @@ async fn setup_database(pool: DynamicDatabaseExecutorPromise) -> Result<()> {
 
     pool.execute(sqlx::query("INSERT INTO todo (title) VALUES (?)").bind("Do something else"))
         .await?;
-
-    let mut s = pool
-        .fetch_many(sqlx::query("SELECT * FROM todo"))
-        .try_filter_map(|f| async move {
-            match f.right() {
-                Some(x) => Ok(Some(SqlTodoItem::from_row(&x)?)),
-                None => Ok(None),
-            }
-        })
-        .boxed();
-
-    while let Some(x) = s.next().await {
-        println!("From Database: {:?}", x);
-    }
 
     Ok(())
 }

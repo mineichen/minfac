@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "raf-hosted-service",
+    "raf-core",
     "raf-web",
     "raf-sql",
     "runtime",

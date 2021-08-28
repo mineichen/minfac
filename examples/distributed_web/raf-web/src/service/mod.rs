@@ -6,7 +6,7 @@ use hyper::{
     Server,
 };
 use minfac::{AllRegistered, Registered, WeakServiceProvider};
-use raf_hosted_service::HostedService;
+use raf_core::HostedService;
 use std::net::SocketAddr;
 
 pub mod error_pages;

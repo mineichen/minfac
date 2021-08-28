@@ -13,5 +13,5 @@ futures = "0.3"
 minfac = { path = "../../../" }
 raf_web = { path = "../raf-web" } 
 raf_sql = { path = "../raf-sql" }
-raf_hosted_service = { path = "../raf-hosted-service" }
+raf_core = { path = "../raf-core" }
 sqlx = { version = "0.5"}
