@@ -3,7 +3,7 @@
 ## Introduction
 In an excellent [Talk](https://youtu.be/2dKZ-dWaCiU?t=1158), Uncle Bob complains, that the first thing he noticed when reviewing an application of his son was the fact that it was a RAILS app. He criticised that RAILS, a popular web framework, should remain in the background, as it is just an abstraction over the concept of an IO device, the web.
 
-"The first thing I should see ought to be the reason the system exists... The web is an IO device, and the one thing we learned back in the 1960s was, that we didn't want to know what IO device we are using." Uncle Bob
+> The first thing I should see ought to be the reason the system exists... The web is an IO device, and the one thing we learned back in the 1960s was, that we didn't want to know what IO device we are using. Uncle Bob
 
 Following this advice, folders should be named after domain functionality like /cart/add rather than technical descriptions like /persister/cart. Plugin based architecture takes this approach one step further and introduces a dedicated plugin project per feature group. If these projects are integrated as dynamic libraries, features and platform can be released independently as long as everything is built with the same RUSTC version ([Rust does not have a stable ABI](https://people.gnome.org/~federico/blog/rust-stable-abi.html)). Beside features, cross cutting concerns like database access, http-routes, logging or running background tasks could be implemented as reusable plugins too. 
 
