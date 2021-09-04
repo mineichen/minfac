@@ -102,4 +102,7 @@ The size of a release libtodo.dylib compiled with `cargo build --release` change
 # Summary
 A plugin based architecture can easily be implemented in Rust using [minfac](https://crates.io/crates/minfac). 
 - It would be great to have the tooling to share library dependencies like tokio as dynamic libraries among plugins so the runtime wouldn't need to link raf-web nor raf-sql  statically
-- Even in a project with just
+- Even in a project with a single plugin, dynamic linking dropped compile time by 38%
+
+If you'd like to read more about plugin based architectures in Rust, please give a thumbs up. If there is enough demand, I'd like to write a series with step-by-step explanation. 
+I'm currently looking for a Job as a Rust developer in Switzerland or remote. If your team is looking for a passionate developer, I'd very much appreciate if you'd consider me for that position.
