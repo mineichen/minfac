@@ -106,4 +106,7 @@ A plugin based architecture can easily be implemented in Rust using [minfac](htt
 - Even in a project with a single plugin, dynamic linking dropped compile time by 38%
 
 If you'd like to read more about plugin based architectures in Rust, please give a thumbs up. If there is enough demand, I'd like to write a series with step-by-step explanation. 
+
 I'm currently looking for a Job as a Rust developer in Switzerland or remote. If your team is looking for a passionate developer, I'd very much appreciate if you'd consider me for that position.
+
+If you liked this post, you might be interested in my previous article about [Writing a better Line Iterator in Rust](https://dev.to/mineichen/writing-a-better-line-iterator-in-rust-443m) 
