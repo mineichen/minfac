@@ -7,8 +7,8 @@ In an excellent [Talk](https://youtu.be/2dKZ-dWaCiU?t=1158), Uncle Bob complains
 
 Following this advice, folders should be named after domain functionality like /cart/add rather than technical descriptions like /persister/cart. Plugin based architecture takes this approach one step further and introduces a dedicated plugin project per feature group. If these projects are integrated as dynamic libraries, features and platform can be released independently as long as everything is built with the same RUSTC version ([Rust does not have a stable ABI](https://people.gnome.org/~federico/blog/rust-stable-abi.html)). Beside features, cross cutting concerns like database access, http-routes, logging or running background tasks could be implemented as reusable plugins too. 
 
-Using a plugin architecture, 
- - Reduces coupling of features to the infrastructure. Files which e.g. know about all http routes or all database migrations violate the [open closed principle](https://de.wikipedia.org/wiki/Open-Closed-Prinzip)
+Using a plugin architecture...
+ - helps decoupling features from the infrastructure. Files which e.g. know about all http routes or all database migrations violate the [open closed principle](https://en.wikipedia.org/wiki/Open%E2%80%93closed_principle)
  - allows extensions to be installed on demand to safe space for unused functionality or to protect licensed features
  - makes a rebuild of the entire executable obsolete. This results in significantly faster compile times. See experiment bellow.
  - allows sharing infallible interfaces. In contrast, microservices usually communicate over a network which adds performance overhead and forces callers to handle potential communicaion errors and therefore increases the overall complexity.
@@ -35,10 +35,10 @@ Unfortunately, there was no IOC container available in Rust which supported more
 
 This is why I recently released the first version of [minfac](https://crates.io/crates/minfac) on crates.io. Not only does it provide the mentioned features, but it also eliminates weaknesses frequently stumbled on in other languages like [scope validation](https://docs.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection?view=aspnetcore-5.0#scope-validation). 
 
-IOC containers solve both challenges of linking implementations of services and service discovery in one thin layer. The following section intends to give a rough overview without going into code too much. 
+IOC containers solve both challenges of linking implementations of services and service discovery in one thin layer. The following section intends to give a rough overview without going too much into code. 
 
 # Implementation in Rust using minfac
-Creating a microframework on top of minfac is straight forward. The following sections illustrate the takeaways when building the [prototype](https://github.com/mineichen/minfac/tree/main/examples/distributed_web). The workspace has the following structure:
+Creating a microframework on top of minfac is straight forward. The following sections illustrate the takeaways when building the [prototype](https://github.com/mineichen/minfac/tree/main/examples/distributed_web). The workspace has the following project structure:
  - raf-core: Core infrastructure. It currently only contains the trait `HostedService` without any implementation. The intent of this trait is explained bellow.
  - raf-sql: Registers a SQLite connection, which can be used by other plugins
  - raf-web: Registers a `HostedService` to run a Webserver. It uses the IOC container to detect routes registered by other plugins.
@@ -83,18 +83,19 @@ Hardware: MacBook Pro 2019, 2.6 GHz 6-Core Intel Core i7, 16 GB 2400 MHz DDR4
 rustc --version
 rustc 1.54.0 (a178d0322 2021-07-26)
 ```
-Compile your project and just change any `println!()` argument within the plugin between each run:
+Compile your project and just change any `println!()` argument within the plugin between each run:  
 1.326, 1.305, 1.363, 1.307, 1.581, 1.597, 1.448, 1.271 -> 1.400 avg. 
 
-Add a reference from `runtime` to `todo` in Cargo.toml and remove the `crate-type = ["cdylib"]` in `todo`. Call `todo::register(&mut collection);` in the beginning of `runtime/main.rs` and compile the workspace. Change any `println!()` argument within the plugin between each run:
+Add a reference from `runtime` to `todo` in Cargo.toml and remove the `crate-type = ["cdylib"]` in `todo`. Call `todo::register(&mut collection);` in the beginning of `runtime/main.rs` and compile the workspace. Change any `println!()` argument within the plugin between each run:  
 2.088, 2.143, 2.114, 2.187, 2.085, 2.086, 2.091, 2.350, 2.013 -> 2.143 agv.
 
 
 As of today, the todo-plugin still includes hyper & tokio, because `hyper::Body` is used for return values of web handlers. However, the experiment of removing this dependency on a separate [branch](https://github.com/mineichen/minfac/tree/remove_hyper_in_plugin/examples/distributed_web) showed no significant effects on build times.
 
-Without hyper, unlinked:
+Without hyper, unlinked:  
 1.291, 1.319, 1.305, 1.447, 1.431, 1.388, 1.315, 1.312 -> 1.351 avg.
-Without hyper, linked:
+
+Without hyper, linked:  
 2.401, 1.990, 2.172, 2.366, 1.970, 2.057, 2.304, 2.213 -> 2.184 avg
 
 The size of a release libtodo.dylib compiled with `cargo build --release` changed from 788’272 to only 682’576 bytes. For my projects, these numbers are not significant enough to justify the increased complexity.
