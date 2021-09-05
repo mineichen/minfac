@@ -66,42 +66,21 @@ Because creating dynamic Rust libraries is currently not very common, you cannot
 ## SQLx integration
 The most difficult library to be integrated into this framework was sqlx. When receiving data from a table, we want to map each row into a typed Rust structure, which would require a generic method on trait objects and this is not possible in rust.
 
-Fortunately, sqlx does a great job in separation of concerns. It was therefore possible to execute queries using a trait object provided by raf-sql and map the rows within the todo-plugin, as the mapping doesn't know anything about tokio and it's static variables. 
+Fortunately, sqlx does a great job in separation of concerns. It was therefore possible to execute queries using a trait object and map the rows with the statically linked sqlx library within the todo-plugin.
 
 Unfortunately, the sqlx executor has the following signature:
 ```rust
 pub trait Executor<'c>: Send + Debug + Sized
 ```
 
-Because of the `Sized` requirement, executors cannot be used as trait objects. Instead, we have to define our own trait [`raf_sql::SqliteExecutor`](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/raf-sql/src/lib.rs) which is implemented on sqlx::Executors within raf-sql. If more people want to use executors as trait objects, let me know in the comments so it might make sense to bring it to sqlx directly. 
+Because of the `Sized` requirement, executors cannot be used as trait objects directly. Instead, I had to define a new trait [`raf_sql::SqliteExecutor`](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/raf-sql/src/lib.rs) which is implemented on sqlx::Executors within raf-sql. If more people want to use executors as trait objects, let me know in the comments so it might make sense to bring it to sqlx. 
 
 # Compilation time
-If all code lives in a single project, changes in any code results in recompilation of the entire project. It is therefore common practice to split big projects into multiple subprojects to reduce build time. When features are even linked dynamically, not eventhe runtime executable has to be recompiled. To demonstrate the improved build times, the following non scientific experiment compares dynamic vs. static linking. Each measurement was taken 8 time by running `time cargo build`:
-
-Hardware: MacBook Pro 2019, 2.6 GHz 6-Core Intel Core i7, 16 GB 2400 MHz DDR4
-```
-rustc --version
-rustc 1.54.0 (a178d0322 2021-07-26)
-```
-Compile your project and just change any `println!()` argument within the plugin between each run:
-1.326, 1.305, 1.363, 1.307, 1.581, 1.597, 1.448, 1.271 -> 1.400 avg. 
-
-Add a reference from `runtime` to `todo` in Cargo.toml and remove the `crate-type = ["cdylib"]` in `todo`. Call `todo::register(&mut collection);` in the beginning of `runtime/main.rs` and compile the workspace. Change any `println!()` argument within the plugin between each run:
-2.088, 2.143, 2.114, 2.187, 2.085, 2.086, 2.091, 2.350, 2.013 -> 2.143 agv.
-
-
-As of today, the todo-plugin still includes hyper & tokio, because `hyper::Body` is used for return values of web handlers. However, the experiment of removing this dependency on a separate [branch](https://github.com/mineichen/minfac/tree/remove_hyper_in_plugin/examples/distributed_web) showed no significant effects on build times.
-
-Without hyper, unlinked:
-1.291, 1.319, 1.305, 1.447, 1.431, 1.388, 1.315, 1.312 -> 1.351 avg.
-Without hyper, linked:
-2.401, 1.990, 2.172, 2.366, 1.970, 2.057, 2.304, 2.213 -> 2.184 avg
-
-The size of a release libtodo.dylib compiled with `cargo build --release` changed from 788’272 to only 682’576 bytes. For my projects, these numbers are not significant enough to justify the increased complexity.
+If all code lives in a single project, changes in any code results in recompilation of the entire project. It is therefore common practice to split big projects into multiple subprojects to reduce build time. When features are linked dynamically, not even the runtime executable has to be recompiled. The following [benchmark]{https://github.com/mineichen/minfac/blob/main/examples/distributed_web/readme.md} shows, that changes in a dynamically linked plugins compile in 1.400s while the same project takes 2.143s on average if linked statically, even if there is just a single plugin yet.
 
 # Summary
 A plugin based architecture can easily be implemented in Rust using [minfac](https://crates.io/crates/minfac). 
-- It would be great to have the tooling to share library dependencies like tokio as dynamic libraries among plugins so the runtime wouldn't need to link raf-web nor raf-sql  statically
+- It would be great to have the tooling to share library dependencies like tokio as dynamic libraries among plugins so the runtime wouldn't need to link plugins which e.g. require tokio statically
 - Even in a project with a single plugin, dynamic linking dropped compile time by 38%
 
 If you'd like to read more about plugin based architectures in Rust, please give a thumbs up. If there is enough demand, I'd like to write a series with step-by-step explanation. 
