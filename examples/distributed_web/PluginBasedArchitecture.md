@@ -73,14 +73,14 @@ Unfortunately, the sqlx executor has the following signature:
 pub trait Executor<'c>: Send + Debug + Sized
 ```
 
-Because of the `Sized` requirement, executors cannot be used as trait objects directly. Instead, I had to define a new trait [`raf_sql::SqliteExecutor`](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/raf-sql/src/lib.rs) which is implemented on sqlx::Executors within raf-sql. If more people want to use executors as trait objects, let me know in the comments so it might make sense to bring it to sqlx. 
+Because of the `Sized` requirement, executors cannot be used as trait objects. Instead, I had to define a new trait [`raf_sql::SqliteExecutor`](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/raf-sql/src/lib.rs) which is implemented on sqlx::Executors within raf-sql. If more people want to use executors as trait objects, let me know in the comments so it might make sense to bring it to sqlx. 
 
 # Compilation time
 If all code lives in a single project, changes in any code results in recompilation of the entire project. It is therefore common practice to split big projects into multiple subprojects to reduce build time. When features are linked dynamically, not even the runtime executable has to be recompiled. The following [benchmark]{https://github.com/mineichen/minfac/blob/main/examples/distributed_web/readme.md} shows, that changes in a dynamically linked plugins compile in 1.400s while the same project takes 2.143s on average if linked statically, even if there is just a single plugin yet.
 
 # Summary
 A plugin based architecture can easily be implemented in Rust using [minfac](https://crates.io/crates/minfac). 
-- It would be great to have the tooling to share library dependencies like tokio as dynamic libraries among plugins so the runtime wouldn't need to link plugins which e.g. require tokio statically
+- It would be great to have the tooling to share library dependencies like tokio as dynamic libraries among plugins so the runtime wouldn't need to be linked statically. 
 - Even in a project with a single plugin, dynamic linking dropped compile time by 38%
 
 If you'd like to read more about plugin based architectures in Rust, please give a thumbs up. If there is enough demand, I'd like to write a series with step-by-step explanation. 
