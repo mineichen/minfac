@@ -6,14 +6,14 @@ In an excellent [Talk](https://youtu.be/2dKZ-dWaCiU?t=1158), Uncle Bob complains
 > The first thing I should see ought to be the reason the system exists... The web is an IO device, and the one thing we learned back in the 1960s was, that we didn't want to know what IO device we are using. Uncle Bob
 
 Following this advice, folders should be named after domain functionality like /cart/add rather than technical descriptions like /persister/cart. Plugin based architecture takes this approach one step further and introduces a dedicated plugin project per feature group. 
-If these projects are integrated as dynamic libraries, features and platform can be released independently as long as they communicate via a stable ABI ([see chapter Challenges->ABI stability"](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/PluginBasedArchitecture.md#user-content-abi stability)). 
+If these projects are integrated as dynamic libraries, features and platform can be released independently as long as they communicate via a stable ABI ([see chapter Challenges/ABI stability](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/PluginBasedArchitecture.md#user-content-abi-stability)). 
 Beside features, cross cutting concerns like database access, http routes, logging or running background tasks could be implemented as reusable plugins too. 
 
 Using a plugin architecture, 
  - reduces coupling of features to the infrastructure. Files which e.g. know about all http routes or all database migrations violate the [open closed principle](https://en.wikipedia.org/wiki/Open%E2%80%93closed_principle)
- - allows functionality to be installed on demand to save disk space or to protect licensed features
+ - allows functionality to be installed on demand to save disk space or to protect licensed features if the software is shipped to the customer
  - makes a rebuild of the entire executable obsolete. This results in significantly faster compile times. See experiment [bellow](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/PluginBasedArchitecture.md#user-content-compilation-time)
- - allows sharing infallible interfaces. In contrast, microservices usually communicate over a network which adds performance overhead and forces callers to handle potential communicaion errors and therefore increases the overall complexity
+ - allows sharing infallible interfaces. In contrast, microservices usually communicate over a network which adds performance overhead and forces callers to handle potential connection errors and therefore increases the overall complexity
 
  In a plugin architecture, plugins can extend the main application with 
  - custom UI elements 
@@ -27,7 +27,7 @@ When composing these plugins, one might require functionality from other plugins
 # Obstacles for implementations in Rust 
 
 I remember learning the PHP framework "Symfony2" back in 2011. This was the first framework I've ever seen, whose core was composed of multiple, independently usable libraries. 
-It even allows replaceing functionality of the core without complicated factory code by overriding the default implementation of an interface with a custom class within the IOC (Inversion of Control) container. 
+It even allows replacing functionality of the core without complicated factory code by overriding the default implementation of an interface with a custom class within the IOC (Inversion of Control) container. 
 Asp.Net Core is using a similar architecture. In both cases, IOC containers play a crucial role to provide maximal flexibility.
 
 Unfortunately, there was no IOC container available in Rust which supported more advanced features like
@@ -69,7 +69,7 @@ Once all HostedServces finish execution, the application shuts down.
 # Challenges
 # ABI stability
 Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This means that plugins might suddenly not be compatible anymore for no obvious reasons.
-Even though I never experienced any problems during development, I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates), once I ship minfac:0.0.2, as datastructures in minfac:0.0.1 doesn't have the `#[repr(C)]` attribute either.
+Even though I never experienced any problems during development (neither on windows, linux nor mac), I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates). A stable ABI will be shipped with minfac:0.0.2, as pub datastructures in minfac:0.0.1 don't have the `#[repr(C)]` attribute yet.
 A discussion about having a stable Rust ABI can be found in the [internals forum](https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347). If anybody knows, why compiling with the compiler option 
 
 If you just want to separate your code into multiple projects, you can simply link your plugins statically, as we did with the raf-* projects.
