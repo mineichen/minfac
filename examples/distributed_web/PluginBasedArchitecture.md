@@ -68,14 +68,14 @@ Once all HostedServces finish execution, the application shuts down.
 
 # Challenges
 # ABI stability
-Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This means that plugins might suddenly not be compatible anymore for no obvious reasons.
+Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This measn that plugins might suddenly not be compatible anymore for no obvious reasons.
 Even though I never experienced any problems during development (neither on windows, linux nor mac), I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates). A stable ABI will be shipped with minfac:0.0.2, as datastructures in minfac:0.0.1 don't have the `#[repr(C)]` attribute yet.
 A discussion about having a stable Rust ABI can be found in the [internals forum](https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347). If anybody knows, why compiling with the compiler option `-C prefer-dynamic` is supported, I'd be interested to know, as I can't see how this problem is solved there. 
 
 If you just want to separate your code into multiple projects, you can simply link your plugins statically, as we did with the raf-* projects.
 ## Static context and asynchronous extensions
 Because creating dynamic Rust libraries is currently not very common, you cannot easily compile and use external libraries as dynamic libs. This is problematic, as each plugin currently has it's own copy of a common library, even if the cargo workspace assures the same versions to be used. 
-For datastructures, this is not a big problem, but static variables e.g. prevent you from using async functions of [tokio](https://crates.io/crates/tokio) directly. Thats the case because they internally refer to the plugins tokio runtime. In main we just started the plattforms tokio runtime, but the plugins runtime is still stopped. 
+For datastructures, this is not a big problem, but static variables e.g. prevent you from using async functions of [tokio](https://crates.io/crates/tokio) directly. That's the case because they internally refer to the plugins tokio runtime. In main we just started the plattforms tokio runtime, but the plugins runtime is still stopped. 
 We can however work around this by statically linking tokio-dependent extensions like raf-web and raf-sql together with the platform. If these extensions provide services as trait objects which are wrapping tokio commands, they can be used within dynamically linked plugins too as shown in the prototype.
 
 ## SQLx integration
