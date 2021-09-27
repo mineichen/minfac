@@ -206,7 +206,7 @@ impl ServiceCollection {
 
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register<'a, T: Any>(&'a mut self, creator: fn() -> T) -> AliasBuilder<'a, T> {
+    pub fn register<T: Any>(&mut self, creator: fn() -> T) -> AliasBuilder<T> {
         let factory: UntypedFnFactory = Box::new(move |_service_state_counter| {
             let func: Box<dyn Fn(&ServiceProvider) -> T> =
                 Box::new(move |_: &ServiceProvider| creator());
@@ -222,10 +222,10 @@ impl ServiceCollection {
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent service leaking in std.
-    pub fn register_shared<'a, T: Any + Send + Sync>(
-        &'a mut self,
+    pub fn register_shared<T: Any + Send + Sync>(
+        &mut self,
         creator: fn() -> Arc<T>,
-    ) -> AliasBuilder<'a, Arc<T>> {
+    ) -> AliasBuilder<Arc<T>> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
 
@@ -399,10 +399,10 @@ impl BuildError {
 pub struct ServiceBuilder<'col, T: Resolvable>(pub &'col mut ServiceCollection, PhantomData<T>);
 
 impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
-    pub fn register<'a, T: core::any::Any>(
-        &'a mut self,
+    pub fn register<T: core::any::Any>(
+        &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,
-    ) -> AliasBuilder<'a, T> {
+    ) -> AliasBuilder<T> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
@@ -422,8 +422,8 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 
         AliasBuilder::new(&mut self.0)
     }
-    pub fn register_shared<'a, T: core::any::Any + Send + Sync>(
-        &'a mut self,
+    pub fn register_shared<T: core::any::Any + Send + Sync>(
+        &mut self,
         creator: fn(TDep::ItemPreChecked) -> alloc::sync::Arc<T>,
     ) -> AliasBuilder<Arc<T>> {
         let factory: UntypedFnFactory = Box::new(move |ctx| {
@@ -437,7 +437,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
                 Box::new(move |provider: &ServiceProvider| {
                     let moved_key = &key;
                     provider.get_or_initialize_pos(service_state_idx, move || {
-                        creator(TDep::resolve_prechecked(provider, &moved_key))
+                        creator(TDep::resolve_prechecked(provider, moved_key))
                     })
                 });
             Ok(func.into())
@@ -451,7 +451,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
 }
 
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
-/// to retrieve services by type. ServiceProviders are final and cannot be modified anymore. When a ServiceProvider goes
+/// to retrieve services by type. ServiceProviders are final and cannot be modified anßymore. When a ServiceProvider goes
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
 /// dropping the original ServiceProvider results in a call to minfac::ERROR_HANDLER, which panics in std and enabled debug_assertions
 pub struct ServiceProvider {

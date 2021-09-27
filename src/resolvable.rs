@@ -216,7 +216,7 @@ unsafe fn resolve_unchecked<T: resolvable::Resolvable>(
         let entry = provider.immutable_state.producers.get_unchecked(pos);
         debug_assert_eq!(entry.get_result_type_id(), &TypeId::of::<T>());
         entry.borrow_for::<T::ItemPreChecked>()
-    })(&provider)
+    })(provider)
 }
 
 impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> {
@@ -248,7 +248,7 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
             let pos = binary_search::binary_search_last_by_key(
                 &self.provider.0.immutable_state.producers[i..],
                 &TypeId::of::<T>(),
-                |f| &f.get_result_type_id(),
+                UntypedFn::get_result_type_id,
             )
             .unwrap();
             unsafe { resolve_unchecked::<T>(&self.provider.0, i + pos) }
@@ -263,7 +263,7 @@ impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> 
                 let pos = binary_search::binary_search_last_by_key(
                     &self.provider.0.immutable_state.producers[i..],
                     &TypeId::of::<T>(),
-                    |f| &f.get_result_type_id(),
+                    UntypedFn::get_result_type_id,
                 )
                 .unwrap();
                 pos + 1
@@ -282,7 +282,7 @@ impl<T: Any> SealedResolvable for AllRegistered<T> {
         let next_pos = binary_search::binary_search_first_by_key(
             &provider.immutable_state.producers,
             &TypeId::of::<Registered<T>>(),
-            |f| &f.get_result_type_id(),
+            |f| f.get_result_type_id(),
         );
         ServiceIterator {
             provider: provider.into(),
@@ -304,16 +304,14 @@ impl<T: Any> SealedResolvable for AllRegistered<T> {
 
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         let first =
-            binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| {
-                &f
-            });
+            binary_search::binary_search_first_by_key(types, &TypeId::of::<Registered<T>>(), |f| f);
 
         match first {
             Some(x) => {
                 let to = binary_search::binary_search_last_by_key(
                     &types[x..],
                     &TypeId::of::<Registered<T>>(),
-                    |f| &f,
+                    |f| f,
                 )
                 .unwrap()
                     + x
@@ -336,7 +334,7 @@ impl<T: Any> SealedResolvable for Registered<T> {
         binary_search::binary_search_last_by_key(
             &provider.immutable_state.producers,
             &TypeId::of::<Self>(),
-            |f| &f.get_result_type_id(),
+            |f| f.get_result_type_id(),
         )
         .map(|index| unsafe { resolve_unchecked::<Self>(provider, index) })
     }
@@ -349,15 +347,15 @@ impl<T: Any> SealedResolvable for Registered<T> {
     }
 
     fn precheck(producers: &[TypeId]) -> Result<Self::PrecheckResult, BuildError> {
-        binary_search::binary_search_last_by_key(&producers, &TypeId::of::<Self>(), |f| &f)
-            .ok_or_else(|| BuildError::new_missing_dependency::<Self>())
+        binary_search::binary_search_last_by_key(producers, &TypeId::of::<Self>(), |f| f)
+            .ok_or_else(BuildError::new_missing_dependency::<Self>)
     }
 
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter {
         let position = binary_search::binary_search_last_by_key(
             types,
             &TypeId::of::<Self>(),
-            |f| &f
+            |f| f
         ).expect("Type not found. This shouldn't be possible, as MissingDependency should have been checked");
         core::iter::once(position)
     }
