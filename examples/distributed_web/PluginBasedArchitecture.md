@@ -6,7 +6,7 @@ In an excellent [Talk](https://youtu.be/2dKZ-dWaCiU?t=1158), Uncle Bob complains
 > The first thing I should see ought to be the reason the system exists... The web is an IO device, and the one thing we learned back in the 1960s was, that we didn't want to know what IO device we are using. Uncle Bob
 
 Following this advice, folders should be named after domain functionality like /cart/add rather than technical descriptions like /persister/cart. Plugin based architecture takes this approach one step further and introduces a dedicated plugin project per feature group. 
-If these projects are integrated as dynamic libraries, features and platform can be released independently as long as everything is built with the same RUSTC version ([Rust does not have a stable ABI](https://people.gnome.org/~federico/blog/rust-stable-abi.html)). 
+If these projects are integrated as dynamic libraries, features and platform can be released independently as long as they communicate via a stable ABI ([see chapter Challenges->ABI stability"](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/PluginBasedArchitecture.md#user-content-abi stability)). 
 Beside features, cross cutting concerns like database access, http routes, logging or running background tasks could be implemented as reusable plugins too. 
 
 Using a plugin architecture, 
@@ -19,7 +19,7 @@ Using a plugin architecture,
  - custom UI elements 
  - http endpoints
  - background processes
- - cli commands 
+ - cli commands
  - ...
 
 When composing these plugins, one might require functionality from other plugins. E.g. the http endpoint of a feature requires a database connection which might be shared among many plugins. Therefore, the executable application needs a mechanism to link those components together. 
@@ -67,7 +67,12 @@ Building the `ServiceProvider` only works, if the dependencies of all registered
 Once all HostedServces finish execution, the application shuts down.
 
 # Challenges
+# ABI stability
+Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This means that plugins might suddenly not be compatible anymore for no obvious reasons.
+Even though I never experienced any problems during development, I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates), once I ship minfac:0.0.2, as datastructures in minfac:0.0.1 doesn't have the `#[repr(C)]` attribute either.
+A discussion about having a stable Rust ABI can be found in the [internals forum](https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347). If anybody knows, why compiling with the compiler option 
 
+If you just want to separate your code into multiple projects, you can simply link your plugins statically, as we did with the raf-* projects.
 ## Static context and asynchronous extensions
 Because creating dynamic Rust libraries is currently not very common, you cannot easily compile and use external libraries as dynamic libs. This is problematic, as each plugin currently has it's own copy of a common library, even if the cargo workspace assures the same versions to be used. 
 For datastructures, this is not a big problem, but static variables e.g. prevent you from using async functions of [tokio](https://crates.io/crates/tokio) directly. Thats the case because they internally refer to the plugins tokio runtime. In main we just started the plattforms tokio runtime, but the plugins runtime is still stopped. 
@@ -91,10 +96,8 @@ If all code lives in a single project, changes in any code results in recompilat
 The following [benchmark](https://github.com/mineichen/minfac/blob/main/examples/distributed_web/readme.md) shows, that changes in a dynamically linked plugins compile in 1.400s while the same project takes 2.143s on average if linked statically, even if there is just a single plugin.
 
 
-# Obstacles
-Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This means that plugins might suddenly not be compatible anymore for no obvious reasons.
-Even though I never experienced any problems during development, I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates), once I ship minfac:0.0.2, as datastructures in minfac:0.0.1 doesn't have the `#[repr(C)]` attribute either.
-A discussion about having a stable Rust ABI can be found in the [internals forum](https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347). If you just want to separate your code into multiple projects, you can simply link your plugins statically, as we did with the raf-* projects.
+
+
 
 
 # Summary
