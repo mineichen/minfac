@@ -67,7 +67,7 @@ Building the `ServiceProvider` only works, if the dependencies of all registered
 Once all HostedServces finish execution, the application shuts down.
 
 # Challenges
-# ABI stability
+## ABI stability
 Unfortunately, just before publishing this article I found out, that Rust [does not guarante a stable ABI](https://nullderef.com/blog/plugin-start/#_abi_unstability_its_much_worse_than_it_seems), not even between two separate runs of the compiler with the same rustc version. This measn that plugins might suddenly not be compatible anymore for no obvious reasons.
 Even though I never experienced any problems during development (neither on windows, linux nor mac), I'd recommend you to just share datastructures with `#[repr(C)]` attribute or use types from [abi_stable_crates](https://github.com/rodrimati1992/abi_stable_crates). A stable ABI will be shipped with minfac:0.0.2, as datastructures in minfac:0.0.1 don't have the `#[repr(C)]` attribute yet.
 A discussion about having a stable Rust ABI can be found in the [internals forum](https://internals.rust-lang.org/t/a-stable-modular-abi-for-rust/12347). If anybody knows, why compiling with the compiler option `-C prefer-dynamic` is supported, I'd be interested to know, as I can't see how this problem is solved there. 
