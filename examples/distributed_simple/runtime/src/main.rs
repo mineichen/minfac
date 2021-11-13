@@ -1,8 +1,8 @@
 use {
-    minfac::ServiceCollection,
-    std::sync::Arc,
     libloading::{Library, Symbol},
-    std::env::consts::{DLL_PREFIX, DLL_SUFFIX}
+    minfac::ServiceCollection,
+    std::env::consts::{DLL_PREFIX, DLL_SUFFIX},
+    std::sync::Arc,
 };
 
 type ServiceRegistrar = unsafe extern "C" fn(&mut minfac::ServiceCollection);
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _lib = unsafe {
         let lib = Library::new(format!("target/debug/{}plugin{}", DLL_PREFIX, DLL_SUFFIX))?;
         let func: Symbol<ServiceRegistrar> = lib.get(b"register")?;
-        func(&mut collection); 
+        func(&mut collection);
         lib
     };
 

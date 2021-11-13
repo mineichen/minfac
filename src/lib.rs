@@ -111,7 +111,7 @@ struct ServiceProducer {
 
 impl ServiceProducer {
     fn new<T: Any>(factory: UntypedFnFactory) -> Self {
-        Self::new_with_type(factory, TypeId::of::<Registered<T>>())
+        Self::new_with_type(factory, TypeId::of::<T>())
     }
     fn new_with_type(factory: UntypedFnFactory, type_id: TypeId) -> Self {
         Self { type_id, factory }
