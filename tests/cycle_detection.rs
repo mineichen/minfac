@@ -31,7 +31,7 @@ fn one_of_multiple_dependencies_asks_for_dependent_should_trigger_cyclic_depende
     } else {
         panic!("Expected error");
     };
-    assert!(msg.contains("minfac::ServiceIterator<minfac::Registered<i32>> ->"));
+    assert!(msg.contains("minfac::service_provider::ServiceIterator<minfac::Registered<i32>> ->"));
     assert!(msg.contains("i64 ->"));
 }
 

@@ -1,6 +1,6 @@
 use {
     super::*,
-    crate::{ServiceCollection, ServiceProducer, ServiceProvider, ServiceProviderImmutableState},
+    crate::{ServiceCollection, ServiceProducer, ServiceProvider},
     alloc::sync::Arc,
     core::{any::Any, clone::Clone, marker::PhantomData},
     once_cell::sync::OnceCell,
@@ -24,7 +24,7 @@ use {
 /// ```
 pub struct ServiceProviderFactory<T: Any + Clone + Send + Sync> {
     service_states_count: usize,
-    immutable_state: Arc<ServiceProviderImmutableState>,
+    immutable_state: Arc<crate::service_provider::ServiceProviderImmutableState>,
     anticipated: PhantomData<T>,
 }
 
@@ -54,42 +54,21 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     ) -> Result<Self, super::BuildError> {
         let parent_service_factories: Vec<_> = parents
             .iter()
-            .flat_map(|parent| {
-                parent
-                    .0
-                    .immutable_state
-                    .producers
-                    .iter()
-                    .zip(parent.0.immutable_state.types.iter())
-                    .map(move |(parent_producer, parent_type)| {
-                        // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                        let factory = unsafe { parent_producer.bind(&parent.0) };
-                        ServiceProducer::new_with_type(Box::new(move |_| Ok(factory)), *parent_type)
-                    })
-            })
+            .flat_map(|parent| unsafe { parent.clone_producers() })
             .collect();
-
-        let factory: crate::UntypedFnFactory = Box::new(move |_service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider) -> T> =
-                Box::new(move |provider| match &provider.service_states.base {
-                    Some(x) => x.downcast_ref::<T>().unwrap().clone(),
-                    None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
-                });
-            Ok(creator.into())
-        });
 
         collection
             .producer_factories
-            .push(ServiceProducer::new::<T>(factory));
+            .push(ServiceProducer::new::<T>(
+                ServiceProvider::build_service_producer_for_base::<T>(),
+            ));
 
         let (producers, types, service_states_count) =
             collection.validate_producers(parent_service_factories)?;
 
-        let immutable_state = Arc::new(ServiceProviderImmutableState {
-            producers,
-            types,
-            _parents: parents,
-        });
+        let immutable_state = Arc::new(
+            crate::service_provider::ServiceProviderImmutableState::new(types, producers, parents),
+        );
 
         Ok(ServiceProviderFactory {
             service_states_count,
@@ -118,15 +97,11 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     pub fn build(&self, remaining: T) -> ServiceProvider {
         let shared_services = alloc::vec![OnceCell::new(); self.service_states_count];
 
-        ServiceProvider {
-            service_states: Arc::new(ServiceProviderMutableState {
-                shared_services,
-                base: Some(Box::new(remaining)),
-            }),
-            immutable_state: self.immutable_state.clone(),
-            #[cfg(debug_assertions)]
-            is_root: true,
-        }
+        ServiceProvider::new(
+            self.immutable_state.clone(),
+            shared_services,
+            Some(Box::new(remaining)),
+        )
     }
 }
 

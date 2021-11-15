@@ -52,4 +52,5 @@ fn main() {
         1 + 2, // Despite u8 beign received by child_provider, u8 is just the sum of i8 from parent
         child_provider.get::<i8>().unwrap()
     );
+    println!("Everything works as expected");
 }

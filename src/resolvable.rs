@@ -1,3 +1,5 @@
+use crate::ServiceIterator;
+
 use {
     super::*,
     core::iter::{Chain, Empty},
@@ -213,71 +215,18 @@ impl SealedResolvable for WeakServiceProvider {
 impl Resolvable for WeakServiceProvider {}
 
 /// pos must be a valid index in provider.producers
-unsafe fn resolve_unchecked<T: resolvable::Resolvable>(
+pub(crate) unsafe fn resolve_unchecked<T: resolvable::Resolvable>(
     provider: &ServiceProvider,
     pos: usize,
 ) -> T::ItemPreChecked {
     ({
-        let entry = provider.immutable_state.producers.get_unchecked(pos);
+        let entry = provider.get_producers().get_unchecked(pos);
         debug_assert_eq!(
             entry.get_result_type_id(),
             &TypeId::of::<T::ItemPreChecked>()
         );
         entry.borrow_for::<T::ItemPreChecked>()
     })(provider)
-}
-
-impl<'a, T: resolvable::Resolvable> core::iter::Iterator for ServiceIterator<T> {
-    type Item = T::ItemPreChecked;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_pos.map(|i| {
-            self.next_pos = if let Some(next) = self.provider.0.immutable_state.producers.get(i + 1)
-            {
-                if next.get_result_type_id() == &TypeId::of::<T::ItemPreChecked>() {
-                    Some(i + 1)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            unsafe { resolve_unchecked::<T>(&self.provider.0, i) }
-        })
-    }
-
-    fn last(self) -> Option<Self::Item>
-    where
-        Self: Sized,
-    {
-        self.next_pos.map(|i| {
-            // If has_next, last must exist
-            let pos = binary_search::binary_search_last_by_key(
-                &self.provider.0.immutable_state.producers[i..],
-                &TypeId::of::<T::ItemPreChecked>(),
-                UntypedFn::get_result_type_id,
-            )
-            .unwrap();
-            unsafe { resolve_unchecked::<T>(&self.provider.0, i + pos) }
-        })
-    }
-    fn count(self) -> usize
-    where
-        Self: Sized,
-    {
-        self.next_pos
-            .map(|i| {
-                let pos = binary_search::binary_search_last_by_key(
-                    &self.provider.0.immutable_state.producers[i..],
-                    &TypeId::of::<T::ItemPreChecked>(),
-                    UntypedFn::get_result_type_id,
-                )
-                .unwrap();
-                pos + 1
-            })
-            .unwrap_or(0)
-    }
 }
 
 impl<T: Any> SealedResolvable for AllRegistered<T> {
@@ -288,15 +237,11 @@ impl<T: Any> SealedResolvable for AllRegistered<T> {
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         let next_pos = binary_search::binary_search_first_by_key(
-            &provider.immutable_state.producers,
+            provider.get_producers(),
             &TypeId::of::<T>(),
             |f| f.get_result_type_id(),
         );
-        ServiceIterator {
-            provider: provider.into(),
-            item_type: PhantomData,
-            next_pos,
-        }
+        ServiceIterator::new(provider.into(), next_pos)
     }
 
     fn resolve_prechecked(
@@ -339,7 +284,7 @@ impl<T: Any> SealedResolvable for Registered<T> {
 
     fn resolve(provider: &ServiceProvider) -> Self::Item {
         binary_search::binary_search_last_by_key(
-            &provider.immutable_state.producers,
+            provider.get_producers(),
             &TypeId::of::<Self::ItemPreChecked>(),
             |f| f.get_result_type_id(),
         )

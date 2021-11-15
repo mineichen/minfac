@@ -8,7 +8,7 @@ keywords = ["ioc", "dependency-injection", "dynamic", "inversion-of-control", "d
 categories = ["config"]
 readme = "README.md"
 license = "MIT"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 once_cell = {version = "1.5", features = []}
