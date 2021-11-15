@@ -32,6 +32,9 @@ pub trait SealedResolvable {
     ) -> Self::ItemPreChecked;
 
     fn precheck(ordered_types: &[TypeId]) -> Result<Self::PrecheckResult, BuildError>;
+
+    // Iterates all positions involved in resolving the type. This is required for checking
+    // missing or cyclic dependencies
     fn iter_positions(types: &[TypeId]) -> Self::TypeIdsIter;
 }
 

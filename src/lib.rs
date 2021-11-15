@@ -8,7 +8,7 @@ use {
         collections::BTreeMap,
         rc::Rc,
         string::{String, ToString},
-        sync::Arc,
+        sync::{Arc, Weak},
         vec,
         vec::Vec,
     },
@@ -19,7 +19,7 @@ use {
     },
     once_cell::sync::OnceCell,
     service_provider_factory::ServiceProviderFactoryBuilder,
-    untyped::{UntypedFn, UntypedPointer},
+    untyped::UntypedFn,
 };
 
 mod binary_search;
@@ -117,7 +117,7 @@ impl ServiceProducer {
         Self { type_id, factory }
     }
 }
-// type CycleChecker = fn() -> Option<BuildError>;
+
 type UntypedFnFactory =
     Box<dyn for<'a> FnOnce(&mut UntypedFnFactoryContext<'a>) -> Result<UntypedFn, BuildError>>;
 
@@ -420,7 +420,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<T>(factory));
 
-        AliasBuilder::new(&mut self.0)
+        AliasBuilder::new(self.0)
     }
     pub fn register_shared<T: core::any::Any + Send + Sync>(
         &mut self,
@@ -446,7 +446,7 @@ impl<'col, TDep: Resolvable> ServiceBuilder<'col, TDep> {
             .producer_factories
             .push(ServiceProducer::new::<alloc::sync::Arc<T>>(factory));
 
-        AliasBuilder::new(&mut self.0)
+        AliasBuilder::new(self.0)
     }
 }
 
@@ -483,6 +483,7 @@ impl Drop for ServiceProvider {
         }
 
         let mut swapped_service_states = Arc::new(ServiceProviderMutableState {
+            // Todo: Just swap shared_services?
             base: None,
             shared_services: Vec::new(),
         });
@@ -493,13 +494,23 @@ impl Drop for ServiceProvider {
                 let checkers: Vec<_> = service_states
                     .shared_services
                     .into_iter()
-                    .filter_map(|c| c.get().and_then(|x| x.get_weak_checker_if_dangling()))
+                    .filter_map(|c| {
+                        c.get().and_then(|x| {
+                            if Arc::strong_count(&x.inner) > 1 {
+                                Some(x.map(|i| Arc::downgrade(i)))
+                            } else {
+                                None
+                            }
+                        })
+                    })
                     .collect();
                 let errors: Vec<_> = checkers
                     .into_iter()
                     .filter_map(|c| {
-                        let v = (c)();
-                        (v.remaining_references > 0).then(|| v)
+                        (Weak::strong_count(&c.inner) > 0).then(|| DanglingCheckerResult {
+                            remaining_references: Weak::strong_count(&c.inner),
+                            typename: c.type_name,
+                        })
                     })
                     .collect();
 
@@ -550,8 +561,16 @@ impl ServiceProvider {
             .shared_services
             .get(index)
             .unwrap()
-            .get_or_init(|| UntypedPointer::new(initializer()));
-        unsafe { pointer.clone_as::<Arc<T>>() }
+            .get_or_init(|| TypeNamed {
+                inner: initializer(),
+                type_name: core::any::type_name::<T>(),
+            });
+
+        pointer
+            .clone()
+            .inner
+            .downcast::<T>()
+            .expect("This is likely a bug in minfac. Cell should never contain uncastable value")
     }
 }
 
@@ -609,8 +628,40 @@ struct ServiceProviderImmutableState {
 }
 
 struct ServiceProviderMutableState {
+    // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
     base: Option<Box<dyn Any + Send + Sync>>,
-    shared_services: Vec<OnceCell<UntypedPointer>>,
+    shared_services: Vec<OnceCell<TypeNamed<Arc<dyn Any + Send + Sync>>>>,
+}
+
+// At the time of writing, core::any::type_name_of_val was behind a nightly feature flag
+#[derive(Clone)]
+struct TypeNamed<T: Clone> {
+    inner: T,
+    type_name: &'static str,
+}
+
+impl<T: Clone> TypeNamed<T> {
+    fn map<TNew: Clone>(&self, mapper: impl Fn(&T) -> TNew) -> TypeNamed<TNew> {
+        TypeNamed {
+            inner: mapper(&self.inner),
+            type_name: self.type_name,
+        }
+    }
+}
+
+pub struct DanglingCheckerResult {
+    pub remaining_references: usize,
+    pub typename: &'static str,
+}
+
+impl core::fmt::Debug for DanglingCheckerResult {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "Type: {} (remaining {})",
+            self.typename, self.remaining_references
+        )
+    }
 }
 
 #[cfg(test)]
