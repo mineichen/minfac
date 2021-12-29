@@ -43,7 +43,7 @@ pub enum Body {
 
 impl<'col, TDep> ServiceCollectionWebExtensions for ServiceBuilder<'col, TDep>
 where
-    TDep: Resolvable + Send,
+    TDep: Resolvable + Send + 'static,
     TDep::ItemPreChecked: Send,
 {
     type Dependency = TDep::ItemPreChecked;
@@ -124,7 +124,7 @@ impl<TDep: Resolvable, TFut: Future<Output = Result<Response>> + Send>
 
 impl<TDep, TFut> ServiceProviderHandler for ServiceProviderHandlerImpl<TDep, TFut>
 where
-    TDep: Resolvable + Send,
+    TDep: Resolvable + Send + 'static,
     TDep::ItemPreChecked: Send,
     TFut: Future<Output = Result<Response>> + Send + 'static,
 {

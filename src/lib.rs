@@ -193,7 +193,7 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
     /// let provider = collection.build().expect("Dependencies are ok");
     /// assert_eq!(Some(42 * 4), provider.get::<u128>());
     /// ```
-    pub fn with<T: Resolvable<TS>>(&mut self) -> ServiceBuilder<'_, TS, T> {
+    pub fn with<T: Resolvable<TS>>(&mut self) -> ServiceBuilder<'_, T, TS> {
         ServiceBuilder(self, PhantomData)
     }
 
@@ -411,12 +411,12 @@ impl<TS: Strategy> BuildError<TS> {
 }
 
 #[doc(hidden)]
-pub struct ServiceBuilder<'col, TS: Strategy, T: Resolvable<TS>>(
+pub struct ServiceBuilder<'col, T: Resolvable<TS>, TS: Strategy=AnyStrategy>(
     pub &'col mut GenericServiceCollection<TS>,
     PhantomData<T>,
 );
 
-impl<'col, TS: Strategy, TDep: Resolvable<TS> + 'static> ServiceBuilder<'col, TS, TDep> {
+impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy> ServiceBuilder<'col, TDep, TS> {
     pub fn register<T: Identifyable<TS::Id>>(
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,

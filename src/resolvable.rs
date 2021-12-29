@@ -9,7 +9,7 @@ use core::{
 };
 
 /// Represents anything resolvable by a ServiceProvider.
-pub trait Resolvable<TS: Strategy>: SealedResolvable<TS> {}
+pub trait Resolvable<TS: Strategy = AnyStrategy>: SealedResolvable<TS> {}
 
 // Sealed, because resolvable module is not pub (Resolvable is reexported in lib.rs)
 // Because this mod is not public, external code cannot call these methods but only reference the type
