@@ -1,7 +1,7 @@
+use core::sync::atomic::{AtomicI32, Ordering};
 use minfac::{
     AllRegistered, BuildError, Registered, Resolvable, ServiceCollection, WeakServiceProvider,
 };
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 #[test]
@@ -82,21 +82,18 @@ fn resolve_shared() {
 
 #[test]
 fn build_with_missing_dep_fails() {
-    build_with_missing_dependency_fails::<Registered<String>>(&["Registered", "String"]);
+    build_with_missing_dependency_fails::<Registered<String>>("String");
 }
 
 #[test]
 fn build_with_missing_tuple2_dep_fails() {
-    build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>)>(&[
-        "Registered",
-        "String",
-    ]);
+    build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>)>("String");
 }
 
 #[test]
 fn build_with_missing_tuple3_dep_fails() {
     build_with_missing_dependency_fails::<(Registered<String>, Registered<i32>, Registered<i32>)>(
-        &["Registered", "String"],
+        "String",
     );
 }
 #[test]
@@ -106,24 +103,24 @@ fn build_with_missing_tuple4_dep_fails() {
         Registered<String>,
         Registered<i32>,
         Registered<i32>,
-    )>(&["Registered", "String"]);
+    )>("String");
 }
 
-fn build_with_missing_dependency_fails<T: Resolvable>(missing_msg_parts: &[&str]) {
-    fn check(mut col: ServiceCollection, missing_msg_parts: &[&str]) {
+fn build_with_missing_dependency_fails<T: Resolvable<minfac::AnyStrategy> + 'static>(
+    missing_msg_part: &str,
+) {
+    fn check(mut col: ServiceCollection, missing_msg_part: &str) {
         col.register(|| 1);
         match col.build() {
             Ok(_) => panic!("Build with missing dependency should fail"),
             Err(e) => match e {
                 BuildError::MissingDependency { name, .. } => {
-                    for part in missing_msg_parts {
-                        assert!(
-                            name.contains(part),
-                            "Expected '{}' to contain '{}'",
-                            name,
-                            part
-                        );
-                    }
+                    assert!(
+                        name.contains(missing_msg_part),
+                        "Expected '{}' to contain '{}'",
+                        name,
+                        missing_msg_part
+                    );
                 }
                 _ => panic!("Unexpected Error"),
             },
@@ -131,11 +128,11 @@ fn build_with_missing_dependency_fails<T: Resolvable>(missing_msg_parts: &[&str]
     }
     let mut col = ServiceCollection::new();
     col.with::<T>().register(|_| ());
-    check(col, missing_msg_parts);
+    check(col, missing_msg_part);
 
     let mut col = ServiceCollection::new();
     col.with::<T>().register_shared(|_| Arc::new(()));
-    check(col, missing_msg_parts);
+    check(col, missing_msg_part);
 }
 
 #[test]

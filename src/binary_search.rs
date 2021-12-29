@@ -1,3 +1,5 @@
+use core::cmp::Ord;
+
 /// Returns the first position of the needle in the input if any
 /// This function is optimized for searching input with multiple occurences of needle
 ///
@@ -6,7 +8,7 @@
 ///
 pub fn binary_search_first_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
-    U: core::cmp::Ord,
+    U: Ord,
     TFn: Fn(&T) -> &U,
 {
     let mut result_idx = None;
@@ -32,7 +34,7 @@ where
 /// This function is optimized for searching input with one or just a few occurences of needle
 pub fn binary_search_last_by_key<T, U, TFn>(input: &[T], needle: &U, find: TFn) -> Option<usize>
 where
-    U: core::cmp::Ord,
+    U: Ord,
     TFn: Fn(&T) -> &U,
 {
     let mut front_plus_1 = 1;

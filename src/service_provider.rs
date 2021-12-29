@@ -1,29 +1,37 @@
-use alloc::{sync::{Arc, Weak}, vec::Vec, boxed::Box};
-use core::{
-    any::{Any, TypeId},
-    marker::PhantomData,
-};
-
-use once_cell::sync::OnceCell;
-
 use crate::{
-    binary_search, untyped::UntypedFn, AllRegistered, Registered, Resolvable, ServiceProducer,
-    TypeNamed,
+    binary_search,
+    strategy::{Identifyable, Strategy},
+    untyped::UntypedFn,
+    AllRegistered, AnyStrategy, Registered, Resolvable, ServiceProducer, TypeNamed,
+    UntypedFnFactory,
 };
+use alloc::{
+    boxed::Box,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
+use core::{
+    any::{type_name, Any},
+    fmt,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    mem::swap,
+};
+use once_cell::sync::OnceCell;
 
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
 /// to retrieve services by type. ServiceProviders are final and cannot be modified anßymore. When a ServiceProvider goes
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
 /// dropping the original ServiceProvider results in a call to minfac::ERROR_HANDLER, which panics in std and enabled debug_assertions
-pub struct ServiceProvider {
-    immutable_state: Arc<ServiceProviderImmutableState>,
+pub struct ServiceProvider<TS: Strategy = AnyStrategy> {
+    immutable_state: Arc<ServiceProviderImmutableState<TS>>,
     service_states: Arc<ServiceProviderMutableState>,
     #[cfg(debug_assertions)]
     is_root: bool,
 }
 
-impl core::fmt::Debug for ServiceProvider {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<TS: Strategy> Debug for ServiceProvider<TS> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
             "ServiceProvider (services: {}, with_state: {})",
             self.immutable_state.producers.len(),
@@ -37,7 +45,7 @@ impl core::fmt::Debug for ServiceProvider {
 /// which have a dependency to ServiceProvider or ServiceIterators<T>, which are using ServiceProvider internally)
 #[cfg(debug_assertions)]
 #[allow(clippy::needless_collect)]
-impl Drop for ServiceProvider {
+impl<TS: Strategy> Drop for ServiceProvider<TS> {
     fn drop(&mut self) {
         if !self.is_root {
             return;
@@ -48,7 +56,7 @@ impl Drop for ServiceProvider {
             base: None,
             shared_services: Vec::new(),
         });
-        core::mem::swap(&mut swapped_service_states, &mut self.service_states);
+        swap(&mut swapped_service_states, &mut self.service_states);
 
         match Arc::try_unwrap(swapped_service_states) {
             Ok(service_states) => {
@@ -94,50 +102,49 @@ impl Drop for ServiceProvider {
     }
 }
 
-impl ServiceProvider {
-    pub fn resolve_unchecked<T: Resolvable>(&self) -> T::ItemPreChecked {
+impl<TS: Strategy> ServiceProvider<TS> {
+    pub fn resolve_unchecked<T: Resolvable<TS>>(&self) -> T::ItemPreChecked {
         let precheck_key =
             T::precheck(&self.immutable_state.types).expect("Resolve unkwnown service");
         T::resolve_prechecked(self, &precheck_key)
     }
 
-    pub fn get<T: Any>(&self) -> Option<T> {
+    pub fn get<T: Identifyable<TS::Id>>(&self) -> Option<T> {
         self.resolve::<Registered<T>>()
     }
-    pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
+    pub fn get_all<T: Identifyable<TS::Id>>(&self) -> ServiceIterator<T, TS> {
         self.resolve::<AllRegistered<T>>()
     }
 
-    pub(crate) fn resolve<T: Resolvable>(&self) -> T::Item {
+    pub(crate) fn resolve<T: Resolvable<TS>>(&self) -> T::Item {
         T::resolve(self)
     }
 
-    pub(crate) fn get_producers(&self) -> &Vec<UntypedFn> {
+    pub(crate) fn get_producers(&self) -> &Vec<UntypedFn<TS>> {
         &self.immutable_state.producers
     }
 
     pub(crate) fn new(
-        immutable_state: Arc<ServiceProviderImmutableState>,
+        immutable_state: Arc<ServiceProviderImmutableState<TS>>,
         shared_services: Vec<OnceCell<TypeNamed<Arc<dyn Any + Send + Sync>>>>,
         base: Option<Box<dyn Any + Send + Sync>>,
     ) -> Self {
         Self {
             immutable_state,
 
-            service_states: Arc::new(crate::service_provider::ServiceProviderMutableState {
+            service_states: Arc::new(ServiceProviderMutableState {
                 shared_services,
                 base,
             }),
-
             #[cfg(debug_assertions)]
             is_root: true,
         }
     }
 
-    pub(crate) fn build_service_producer_for_base<T: Any + Clone + Send + Sync>(
-    ) -> crate::UntypedFnFactory {
+    pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
+    ) -> UntypedFnFactory<TS> {
         Box::new(|_service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider) -> T> =
+            let creator: Box<dyn Fn(&ServiceProvider<TS>) -> T> =
                 Box::new(|provider| match &provider.service_states.base {
                     Some(x) => x.downcast_ref::<T>().unwrap().clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
@@ -158,7 +165,7 @@ impl ServiceProvider {
             .unwrap()
             .get_or_init(|| TypeNamed {
                 inner: initializer(),
-                type_name: core::any::type_name::<T>(),
+                type_name: type_name::<T>(),
             });
 
         pointer
@@ -171,15 +178,15 @@ impl ServiceProvider {
 
 /// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
 /// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called
-pub struct WeakServiceProvider(ServiceProvider);
+pub struct WeakServiceProvider<TS: Strategy = AnyStrategy>(ServiceProvider<TS>);
 
-impl WeakServiceProvider {
-    fn resolve<T: Resolvable>(&self) -> T::Item {
+impl<TS: Strategy> WeakServiceProvider<TS> {
+    fn resolve<T: Resolvable<TS>>(&self) -> T::Item {
         T::resolve(&self.0)
     }
 
     /// Reference for Arc<self> must be kept for the entire lifetime of the new ServiceProvider
-    pub(crate) unsafe fn clone_producers(&self) -> impl Iterator<Item = ServiceProducer> {
+    pub(crate) unsafe fn clone_producers(&self) -> impl Iterator<Item = ServiceProducer<TS>> {
         let static_self = &*(self as *const Self);
         static_self
             .0
@@ -190,28 +197,28 @@ impl WeakServiceProvider {
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
                 let factory = parent_producer.bind(&static_self.0);
-                ServiceProducer::new_with_type(Box::new(move |_| Ok(factory)), *parent_type)
+                ServiceProducer::<TS>::new_with_type(Box::new(move |_| Ok(factory)), *parent_type)
             })
     }
 
-    pub fn resolve_unchecked<T: Resolvable>(&self) -> T::ItemPreChecked {
+    pub fn resolve_unchecked<T: Resolvable<TS>>(&self) -> T::ItemPreChecked {
         let precheck_key =
             T::precheck(&self.0.immutable_state.types).expect("Resolve unkwnown service");
         T::resolve_prechecked(&self.0, &precheck_key)
     }
 
-    pub fn get<T: Any>(&self) -> Option<T> {
+    pub fn get<T: Identifyable<TS::Id>>(&self) -> Option<T> {
         self.resolve::<Registered<T>>()
     }
 
-    pub fn get_all<T: Any>(&self) -> ServiceIterator<Registered<T>> {
+    pub fn get_all<T: Identifyable<TS::Id>>(&self) -> ServiceIterator<T, TS> {
         self.resolve::<AllRegistered<T>>()
     }
 }
 
-impl Clone for WeakServiceProvider {
+impl<TS: Strategy> Clone for WeakServiceProvider<TS> {
     fn clone(&self) -> Self {
-        Self(ServiceProvider {
+        Self(ServiceProvider::<TS> {
             immutable_state: self.0.immutable_state.clone(),
             service_states: self.0.service_states.clone(),
             #[cfg(debug_assertions)]
@@ -220,8 +227,8 @@ impl Clone for WeakServiceProvider {
     }
 }
 
-impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
-    fn from(provider: &'a ServiceProvider) -> Self {
+impl<'a, TS: Strategy> From<&'a ServiceProvider<TS>> for WeakServiceProvider<TS> {
+    fn from(provider: &'a ServiceProvider<TS>) -> Self {
         WeakServiceProvider(ServiceProvider {
             immutable_state: provider.immutable_state.clone(),
             service_states: provider.service_states.clone(),
@@ -231,18 +238,18 @@ impl<'a> From<&'a ServiceProvider> for WeakServiceProvider {
     }
 }
 
-pub(crate) struct ServiceProviderImmutableState {
-    types: Vec<TypeId>,
-    producers: Vec<UntypedFn>,
+pub(crate) struct ServiceProviderImmutableState<TS: Strategy> {
+    types: Vec<TS::Id>,
+    producers: Vec<UntypedFn<TS>>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
-    _parents: Vec<WeakServiceProvider>,
+    _parents: Vec<WeakServiceProvider<TS>>,
 }
 
-impl ServiceProviderImmutableState {
+impl<TS: Strategy> ServiceProviderImmutableState<TS> {
     pub(crate) fn new(
-        types: Vec<TypeId>,
-        producers: Vec<UntypedFn>,
-        _parents: Vec<WeakServiceProvider>,
+        types: Vec<TS::Id>,
+        producers: Vec<UntypedFn<TS>>,
+        _parents: Vec<WeakServiceProvider<TS>>,
     ) -> Self {
         Self {
             types,
@@ -260,14 +267,14 @@ pub(crate) struct ServiceProviderMutableState {
 
 /// Type used to retrieve all instances `T` of a `ServiceProvider`.
 /// Services are built just in time when calling `next()`
-pub struct ServiceIterator<T> {
+pub struct ServiceIterator<T, TS: Strategy = AnyStrategy> {
     next_pos: Option<usize>,
-    provider: WeakServiceProvider,
+    provider: WeakServiceProvider<TS>,
     item_type: PhantomData<T>,
 }
 
-impl<T> ServiceIterator<T> {
-    pub(crate) fn new(provider: WeakServiceProvider, next_pos: Option<usize>) -> Self {
+impl<T, TS: Strategy> ServiceIterator<T, TS> {
+    pub(crate) fn new(provider: WeakServiceProvider<TS>, next_pos: Option<usize>) -> Self {
         Self {
             provider,
             item_type: PhantomData,
@@ -276,8 +283,8 @@ impl<T> ServiceIterator<T> {
     }
 }
 
-impl<'a, T: Resolvable> core::iter::Iterator for ServiceIterator<T> {
-    type Item = T::ItemPreChecked;
+impl<'a, TS: Strategy, T: Identifyable<TS::Id>> Iterator for ServiceIterator<T, TS> {
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_pos.map(|i| {
@@ -287,11 +294,9 @@ impl<'a, T: Resolvable> core::iter::Iterator for ServiceIterator<T> {
                 .immutable_state
                 .producers
                 .get(i + 1)
-                .and_then(|next| {
-                    (next.get_result_type_id() == &TypeId::of::<T::ItemPreChecked>()).then(|| i + 1)
-                });
+                .and_then(|next| (next.get_result_type_id() == &T::get_id()).then(|| i + 1));
 
-            unsafe { crate::resolvable::resolve_unchecked::<T>(&self.provider.0, i) }
+            unsafe { crate::resolvable::resolve_unchecked::<TS, T>(&self.provider.0, i) }
         })
     }
 
@@ -302,11 +307,11 @@ impl<'a, T: Resolvable> core::iter::Iterator for ServiceIterator<T> {
         self.next_pos.map(|i| {
             let pos = binary_search::binary_search_last_by_key(
                 &self.provider.0.immutable_state.producers[i..],
-                &TypeId::of::<T::ItemPreChecked>(),
-                UntypedFn::get_result_type_id,
-            )
-            .expect("to be present if next_pos has value");
-            unsafe { crate::resolvable::resolve_unchecked::<T>(&self.provider.0, i + pos) }
+                &T::get_id(),
+                UntypedFn::<TS>::get_result_type_id,
+            );
+            let pos = pos.expect("to be present if next_pos has value");
+            unsafe { crate::resolvable::resolve_unchecked::<TS, T>(&self.provider.0, i + pos) }
         })
     }
     fn count(self) -> usize
@@ -317,7 +322,7 @@ impl<'a, T: Resolvable> core::iter::Iterator for ServiceIterator<T> {
             .map(|i| {
                 let pos = binary_search::binary_search_last_by_key(
                     &self.provider.0.immutable_state.producers[i..],
-                    &TypeId::of::<T::ItemPreChecked>(),
+                    &T::get_id(),
                     UntypedFn::get_result_type_id,
                 )
                 .expect("having at least one item because has next_pos");
@@ -332,8 +337,8 @@ struct DanglingCheckerResult {
     pub typename: &'static str,
 }
 
-impl core::fmt::Debug for DanglingCheckerResult {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Debug for DanglingCheckerResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Type: {} (remaining {})",

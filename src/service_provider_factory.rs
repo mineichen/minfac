@@ -1,10 +1,11 @@
-use {
-    super::*,
-    crate::{ServiceCollection, ServiceProducer, ServiceProvider},
-    alloc::sync::Arc,
-    core::{any::Any, clone::Clone, marker::PhantomData},
-    once_cell::sync::OnceCell,
+use crate::{
+    service_provider::ServiceProviderImmutableState,
+    strategy::{Identifyable, Strategy},
+    AnyStrategy, GenericServiceCollection, ServiceProducer, ServiceProvider, WeakServiceProvider, ProducerValidationResult,
 };
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use core::{clone::Clone, marker::PhantomData};
+use once_cell::sync::OnceCell;
 
 /// Performs all checks to build a ServiceProvider on premise that an instance of type T will be available.
 /// Therefore, multiple ServiceProvider with a different base can be created very efficiently.
@@ -22,36 +23,39 @@ use {
 /// assert_eq!(Some(1i64), provider1.get::<i64>());
 /// assert_eq!(Some(2i64), provider2.get::<i64>());
 /// ```
-pub struct ServiceProviderFactory<T: Any + Clone + Send + Sync> {
+pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy = AnyStrategy> {
     service_states_count: usize,
-    immutable_state: Arc<crate::service_provider::ServiceProviderImmutableState>,
+    immutable_state: Arc<crate::service_provider::ServiceProviderImmutableState<TS>>,
     anticipated: PhantomData<T>,
 }
 
-pub struct ServiceProviderFactoryBuilder {
-    collection: ServiceCollection,
-    providers: Vec<WeakServiceProvider>,
+pub struct ServiceProviderFactoryBuilder<TS: Strategy> {
+    collection: GenericServiceCollection<TS>,
+    providers: Vec<WeakServiceProvider<TS>>,
 }
 
-impl ServiceProviderFactoryBuilder {
-    pub fn create(collection: ServiceCollection, first_parent: WeakServiceProvider) -> Self {
+impl<TS: Strategy> ServiceProviderFactoryBuilder<TS> {
+    pub fn create(
+        collection: GenericServiceCollection<TS>,
+        first_parent: WeakServiceProvider<TS>,
+    ) -> Self {
         Self {
             collection,
-            providers: alloc::vec!(first_parent),
+            providers: vec![first_parent],
         }
     }
-    pub fn build_factory<T: Any + Clone + Send + Sync>(
+    pub fn build_factory<T: Identifyable<TS::Id> + Clone + Send + Sync>(
         self,
-    ) -> Result<ServiceProviderFactory<T>, super::BuildError> {
-        ServiceProviderFactory::create(self.collection, self.providers)
+    ) -> Result<ServiceProviderFactory<T, TS>, super::BuildError<TS>> {
+        ServiceProviderFactory::<T, TS>::create(self.collection, self.providers)
     }
 }
 
-impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
+impl<TS: Strategy, T: Identifyable<TS::Id> + Clone + Send + Sync> ServiceProviderFactory<T, TS> {
     pub fn create(
-        mut collection: ServiceCollection,
-        parents: Vec<WeakServiceProvider>,
-    ) -> Result<Self, super::BuildError> {
+        mut collection: GenericServiceCollection<TS>,
+        parents: Vec<WeakServiceProvider<TS>>,
+    ) -> Result<Self, super::BuildError<TS>> {
         let parent_service_factories: Vec<_> = parents
             .iter()
             .flat_map(|parent| unsafe { parent.clone_producers() })
@@ -59,18 +63,18 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
 
         collection
             .producer_factories
-            .push(ServiceProducer::new::<T>(
-                ServiceProvider::build_service_producer_for_base::<T>(),
+            .push(ServiceProducer::<TS>::new::<T>(
+                ServiceProvider::<TS>::build_service_producer_for_base::<T>(),
             ));
 
-        let (producers, types, service_states_count) =
+        let ProducerValidationResult { producers, types, service_states_count} =
             collection.validate_producers(parent_service_factories)?;
 
-        let immutable_state = Arc::new(
-            crate::service_provider::ServiceProviderImmutableState::new(types, producers, parents),
-        );
+        let immutable_state = Arc::new(ServiceProviderImmutableState::<TS>::new(
+            types, producers, parents,
+        ));
 
-        Ok(ServiceProviderFactory {
+        Ok(ServiceProviderFactory::<_, TS> {
             service_states_count,
             immutable_state,
             anticipated: PhantomData,
@@ -94,7 +98,7 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
     /// assert!(result.is_err());
     /// # }
     /// ```
-    pub fn build(&self, remaining: T) -> ServiceProvider {
+    pub fn build(&self, remaining: T) -> ServiceProvider<TS> {
         let shared_services = alloc::vec![OnceCell::new(); self.service_states_count];
 
         ServiceProvider::new(
@@ -109,8 +113,11 @@ impl<T: Any + Clone + Send + Sync> ServiceProviderFactory<T> {
 mod tests {
     use {
         super::*,
-        crate::{BuildError, Registered},
-        core::sync::atomic::{AtomicI32, Ordering},
+        crate::{BuildError, Registered, ServiceCollection},
+        core::{
+            any::TypeId,
+            sync::atomic::{AtomicI32, Ordering},
+        },
     };
 
     #[test]
@@ -218,8 +225,8 @@ mod tests {
         let mut collection = ServiceCollection::new();
         collection.with::<Registered<i32>>().register(|s| s as i64);
         if let Err(BuildError::MissingDependency { id, name }) = collection.build_factory::<u32>() {
-            assert_eq!(id, core::any::TypeId::of::<Registered<i32>>());
-            assert_eq!(name, "minfac::Registered<i32>");
+            assert_eq!(id, TypeId::of::<i32>());
+            assert_eq!(name, "i32");
         } else {
             panic!("Expected to have missing dependency error");
         }
