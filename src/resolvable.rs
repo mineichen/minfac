@@ -270,15 +270,17 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegister
     }
 
     fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+        // Todo: Implement to avoid lookup during service resolution
         Ok(())
     }
 
     fn iter_positions(types: &[TS::Id]) -> Self::TypeIdsIter {
-        let first = binary_search::binary_search_first_by_key(types, &T::get_id(), |f| f);
+        let id = T::get_id();
+        let first = binary_search::binary_search_first_by_key(types, &id, |f| f);
 
         match first {
             Some(x) => {
-                let to = binary_search::binary_search_last_by_key(&types[x..], &T::get_id(), |f| f)
+                let to = binary_search::binary_search_last_by_key(&types[x..], &id, |f| f)
                     .unwrap()
                     + x
                     + 1;

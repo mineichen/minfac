@@ -11,8 +11,11 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-once_cell = {version = "1.5", features = []}
+once_cell = { version = "1.5", features = []}
+abi_stable = { version = "0.10", default-features = false, optional = true } 
+fn_ffi = { path = "../fn_ffi" }
 
 [features]
 default = ["std"]
+stable_abi = ["fn_ffi/abi_stable", "abi_stable" ]
 std = []

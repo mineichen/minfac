@@ -23,6 +23,8 @@ mod service_provider;
 mod service_provider_factory;
 mod strategy;
 mod untyped;
+#[cfg(feature = "stable_abi")]
+pub mod stable_abi;
 
 pub use resolvable::Resolvable;
 pub use service_provider_factory::ServiceProviderFactory;
@@ -31,6 +33,7 @@ pub use service_provider::ServiceIterator;
 pub use service_provider::ServiceProvider;
 pub use service_provider::WeakServiceProvider;
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
+
 
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
@@ -119,12 +122,28 @@ impl<TS: Strategy> ServiceProducer<TS> {
         }
     }
 }
-
+/* 
 type UntypedFnFactory<TS> = Box<
-    dyn for<'a> FnOnce(
-        &mut UntypedFnFactoryContext<'a, TS>,
+    dyn FnOnce(
+        &mut UntypedFnFactoryContext<TS>,
     ) -> Result<UntypedFn<TS>, BuildError<TS>>,
->;
+>;*/
+
+struct UntypedFnFactory<TS: Strategy> {
+    creator: extern fn(outer_context: &mut usize, inner_context: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>>,
+    dropper: extern fn(outer_context: usize),
+    outer_context: usize
+}
+impl<TS: Strategy> UntypedFnFactory<TS> {
+    fn call(mut self, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
+        (self.creator)(&mut self.outer_context, ctx)
+    }
+}
+impl<TS: Strategy> Drop for UntypedFnFactory<TS> {
+    fn drop(&mut self) {
+        (self.dropper)(self.outer_context)
+    }
+}
 
 struct UntypedFnFactoryContext<'a, TS: Strategy> {
     service_descriptor_pos: usize,
@@ -203,11 +222,22 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
         &mut self,
         instance: T,
     ) {
-        let factory: UntypedFnFactory<TS> = Box::new(move |_service_state_counter| {
+        extern fn factory<T: Identifyable<TS::Id> + Clone + 'static + Send + Sync, TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
+            let outer_ctx = *outer_ctx;
             let func: Box<dyn Fn(&ServiceProvider<TS>) -> T> =
-                Box::new(move |_: &ServiceProvider<TS>| instance.clone());
+                Box::new(move |_: &ServiceProvider<TS>| unsafe { &*(outer_ctx as *mut T)}.clone());
             Ok(func.into())
-        });
+        }
+        extern fn dropper<T: Identifyable<TS::Id> + Clone + 'static + Send + Sync, TS: Strategy>(inner_ctx: usize) {
+            drop(unsafe { Box::from_raw(inner_ctx as *mut T) })
+        }
+        let ctx = Box::new(instance);
+        let factory = UntypedFnFactory { 
+            outer_context: Box::into_raw(ctx) as usize,
+            creator: factory::<T, TS>,
+            dropper: dropper::<T, TS>
+         };
+
         self.producer_factories
             .push(ServiceProducer::<TS>::new::<T>(factory));
     }
@@ -215,11 +245,21 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        let factory: UntypedFnFactory<TS> = Box::new(move |_service_state_counter| {
+        extern fn factory<T: Identifyable<TS::Id>, TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
+            let outer_ctx = *outer_ctx;
+            let creator: fn() -> T = unsafe { std::mem::transmute(outer_ctx) };
             let func: Box<dyn Fn(&ServiceProvider<TS>) -> T> =
                 Box::new(move |_: &ServiceProvider<TS>| creator());
             Ok(func.into())
-        });
+        }
+        extern fn dropper<T: Identifyable<TS::Id>, TS: Strategy>(inner_ctx: usize) {
+        }
+
+        let factory = UntypedFnFactory { 
+            outer_context: creator as usize,
+            creator: factory::<T, TS>,
+            dropper: dropper::<T, TS>
+         };
         self.producer_factories
             .push(ServiceProducer::<TS>::new::<T>(factory));
         AliasBuilder::new(self)
@@ -237,6 +277,24 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
     where
         Arc<T>: Identifyable<TS::Id>,
     {
+        extern fn factory<T: Send + Sync, TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> where Arc<T>: Identifyable<TS::Id> {
+            let outer_ctx = *outer_ctx;
+            let service_state_idx = ctx.reserve_state_space();
+            let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(outer_ctx) };
+            let func: Box<dyn Fn(&ServiceProvider<TS>) -> Arc<T>> =
+                Box::new(move |provider: &ServiceProvider<TS>| {
+                    provider.get_or_initialize_pos(service_state_idx, creator)
+                });
+            Ok(func.into())
+        }
+        extern fn dropper<T, TS: Strategy>(inner_ctx: usize) where Arc<T>: Identifyable<TS::Id>  {
+        }
+        let factory = UntypedFnFactory { 
+            outer_context: creator as usize,
+            creator: factory::<T, TS>,
+            dropper: dropper::<T, TS>
+         };
+         /*
         let factory: UntypedFnFactory<TS> = Box::new(move |ctx| {
             let service_state_idx = ctx.reserve_state_space();
 
@@ -245,7 +303,7 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
                     provider.get_or_initialize_pos(service_state_idx, creator)
                 });
             Ok(func.into())
-        });
+        }); */
         self.producer_factories
             .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));
 
@@ -311,7 +369,7 @@ impl<TS: Strategy> GenericServiceCollection<TS> {
                 cyclic_reference_candidates: &mut cyclic_reference_candidates,
                 service_descriptor_pos: i,
             };
-            let producer = (x.factory)(&mut ctx)?;
+            let producer = x.factory.call(&mut ctx)?;
             debug_assert_eq!(&x.identifier, producer.get_result_type_id());
             producers.push(producer);
             types.push(x.identifier);
@@ -421,8 +479,10 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy> ServiceBuilder<'col, TD
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,
     ) -> AliasBuilder<T, TS> {
-        let factory: UntypedFnFactory<TS> = Box::new(move |ctx| {
+        extern fn factory<T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'static, TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
+            let outer_ctx = *outer_ctx;
             let key = TDep::precheck(ctx.final_ordered_types)?;
+            let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(outer_ctx) };
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
@@ -433,7 +493,14 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy> ServiceBuilder<'col, TD
                     creator(arg)
                 });
             Ok(func.into())
-        });
+        }
+        extern fn dropper(inner_ctx: usize) {
+        }
+        let factory = UntypedFnFactory { 
+            outer_context: creator as usize,
+            creator: factory::<T, TDep, TS>,
+            dropper
+        };
         self.0
             .producer_factories
             .push(ServiceProducer::<TS>::new::<T>(factory));
@@ -447,7 +514,9 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy> ServiceBuilder<'col, TD
     where
         Arc<T>: Identifyable<TS::Id>,
     {
-        let factory: UntypedFnFactory<TS> = Box::new(move |ctx| {
+        extern fn factory<T: Send + Sync, TDep: Resolvable<TS> + 'static, TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> where Arc<T>: Identifyable<TS::Id>  {
+            let outer_ctx = *outer_ctx;
+            let creator: fn(TDep::ItemPreChecked) -> Arc<T> = unsafe { std::mem::transmute(outer_ctx) };
             let service_state_idx = ctx.reserve_state_space();
             let key = TDep::precheck(ctx.final_ordered_types)?;
             ctx.register_cyclic_reference_candidate(
@@ -462,7 +531,14 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy> ServiceBuilder<'col, TD
                     })
                 });
             Ok(func.into())
-        });
+        }
+        extern fn dropper(inner_ctx: usize) {
+        }
+        let factory = UntypedFnFactory { 
+            outer_context: creator as usize,
+            creator: factory::<T, TDep, TS>,
+            dropper
+        };
         self.0
             .producer_factories
             .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));
