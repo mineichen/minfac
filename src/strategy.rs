@@ -3,9 +3,11 @@ use core::{
     fmt::Debug,
 };
 
-pub trait Strategy: 'static + Debug + Send + Sync {
+#[cfg_attr(feature = "stable_abi", abi_stable::sabi_trait)]
+pub trait Strategy: Debug + Send + Sync {
     type Id: Ord + Debug + Copy + PartialEq + Eq;
 }
+
 
 pub trait Identifyable<T: Ord>: 'static {
     fn get_id() -> T;

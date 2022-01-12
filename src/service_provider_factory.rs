@@ -24,18 +24,18 @@ use once_cell::sync::OnceCell;
 /// assert_eq!(Some(1i64), provider1.get::<i64>());
 /// assert_eq!(Some(2i64), provider2.get::<i64>());
 /// ```
-pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy = AnyStrategy> {
+pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy + 'static = AnyStrategy> {
     service_states_count: usize,
     immutable_state: Arc<crate::service_provider::ServiceProviderImmutableState<TS>>,
     anticipated: PhantomData<T>,
 }
 
-pub struct ServiceProviderFactoryBuilder<TS: Strategy> {
+pub struct ServiceProviderFactoryBuilder<TS: Strategy  + 'static> {
     collection: GenericServiceCollection<TS>,
     providers: Vec<WeakServiceProvider<TS>>,
 }
 
-impl<TS: Strategy> ServiceProviderFactoryBuilder<TS> {
+impl<TS: Strategy  + 'static> ServiceProviderFactoryBuilder<TS> {
     pub fn create(
         collection: GenericServiceCollection<TS>,
         first_parent: WeakServiceProvider<TS>,
@@ -52,7 +52,7 @@ impl<TS: Strategy> ServiceProviderFactoryBuilder<TS> {
     }
 }
 
-impl<TS: Strategy, T: Identifyable<TS::Id> + Clone + Send + Sync> ServiceProviderFactory<T, TS> {
+impl<TS: Strategy  + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync> ServiceProviderFactory<T, TS> {
     pub fn create(
         mut collection: GenericServiceCollection<TS>,
         parents: Vec<WeakServiceProvider<TS>>,
@@ -123,8 +123,7 @@ mod tests {
             sync::atomic::{AtomicI32, Ordering},
         },
     };
-
-    /*
+/*
     #[test]
     fn services_are_returned_in_correct_order() {
         let mut parent_collection = ServiceCollection::new();
@@ -144,6 +143,7 @@ mod tests {
 
         assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
+    
     #[test]
     fn uses_same_parent_arc_for_two_providers_from_the_same_child_factory() {
         let mut parent_provider = ServiceCollection::new();

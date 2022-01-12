@@ -5,7 +5,7 @@ use crate::{
 use alloc::boxed::Box;
 
 #[repr(C)]
-pub struct UntypedFn<TS: Strategy> {
+pub struct UntypedFn<TS: Strategy  + 'static> {
     result_type_id: TS::Id,
     pointer: usize,
     context: AutoFreePointer,
@@ -13,10 +13,10 @@ pub struct UntypedFn<TS: Strategy> {
         unsafe extern "C" fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
 }
 
-unsafe impl<TS: Strategy> Send for UntypedFn<TS> {}
-unsafe impl<TS: Strategy> Sync for UntypedFn<TS> {}
+unsafe impl<TS: Strategy  + 'static> Send for UntypedFn<TS> {}
+unsafe impl<TS: Strategy  + 'static> Sync for UntypedFn<TS> {}
 
-impl<TS: Strategy> UntypedFn<TS> {
+impl<TS: Strategy  + 'static> UntypedFn<TS> {
     pub fn get_result_type_id(&self) -> &TS::Id {
         &self.result_type_id
     }
@@ -35,7 +35,7 @@ impl<TS: Strategy> UntypedFn<TS> {
     }
 }
 
-impl<TS: Strategy, T> From<(fn(&ServiceProvider<TS>, &AutoFreePointer) -> T, AutoFreePointer)> for UntypedFn<TS>
+impl<TS: Strategy  + 'static, T> From<(fn(&ServiceProvider<TS>, &AutoFreePointer) -> T, AutoFreePointer)> for UntypedFn<TS>
 where
     T: Identifyable<TS::Id>,
 {
@@ -43,7 +43,7 @@ where
         (factory, stage1_context): (fn(&ServiceProvider<TS>, &AutoFreePointer) -> T, AutoFreePointer),
     ) -> Self {
         type InnerContext<TS> = (*const UntypedFn<TS>, *const ServiceProvider<TS>);
-        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy>(
+        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy  + 'static>(
             inner: *const UntypedFn<TS>,
             provider: *const ServiceProvider<TS>,
         ) -> UntypedFn<TS> {
@@ -65,6 +65,7 @@ where
 }
 
 #[repr(C)]
+#[cfg_attr(feature = "stable_abi", derive(abi_stable::StableAbi))]
 pub struct AutoFreePointer {
     dropper: extern "C" fn(outer_context: usize),
     context: usize,

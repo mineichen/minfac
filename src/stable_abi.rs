@@ -9,13 +9,15 @@ use std::{
 
 use crate::strategy::Identifyable;
 
-#[derive(Debug)]
+#[repr(C)]
+#[derive(Debug, StableAbi)]
 pub struct StableAbiStrategy {}
 
 impl crate::Strategy for StableAbiStrategy {
     type Id = StableAbiTypeId;
 }
 
+#[repr(C)]
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Clone, Copy, Hash)]
 pub struct StableAbiTypeId {
     name: &'static str,

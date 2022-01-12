@@ -9,11 +9,11 @@ use core::{
 };
 
 /// Represents anything resolvable by a ServiceProvider.
-pub trait Resolvable<TS: Strategy = AnyStrategy>: SealedResolvable<TS> {}
+pub trait Resolvable<TS: Strategy + 'static = AnyStrategy>: SealedResolvable<TS> {}
 
 // Sealed, because resolvable module is not pub (Resolvable is reexported in lib.rs)
 // Because this mod is not public, external code cannot call these methods but only reference the type
-pub trait SealedResolvable<TS: Strategy> {
+pub trait SealedResolvable<TS: Strategy + 'static> {
     /// Used if it's uncertain, wether a type is initializable, e.g.
     /// - Option<i32> for provider.get<Singleton<i32>>()
     type Item;
@@ -43,7 +43,7 @@ pub trait SealedResolvable<TS: Strategy> {
     fn iter_positions(types: &[TS::Id]) -> Self::TypeIdsIter;
 }
 
-impl<TS: Strategy> SealedResolvable<TS> for () {
+impl<TS: Strategy + 'static> SealedResolvable<TS> for () {
     type Item = ();
     type ItemPreChecked = ();
     type PrecheckResult = ();
@@ -64,9 +64,9 @@ impl<TS: Strategy> SealedResolvable<TS> for () {
         empty()
     }
 }
-impl<TS: Strategy> Resolvable<TS> for () {}
+impl<TS: Strategy + 'static> Resolvable<TS> for () {}
 
-impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResolvable<TS> for (T0, T1) {
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResolvable<TS> for (T0, T1) {
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult);
@@ -96,9 +96,9 @@ impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResolvable<TS> 
         T0::iter_positions(types).chain(T1::iter_positions(types))
     }
 }
-impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>> Resolvable<TS> for (T0, T1) {}
+impl<TS: Strategy  + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> Resolvable<TS> for (T0, T1) {}
 
-impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> SealedResolvable<TS>
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> SealedResolvable<TS>
     for (T0, T1, T2)
 {
     type Item = (T0::Item, T1::Item, T2::Item);
@@ -137,13 +137,13 @@ impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> S
             .chain(T2::iter_positions(types))
     }
 }
-impl<TS: Strategy, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> Resolvable<TS>
+impl<TS: Strategy  + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> Resolvable<TS>
     for (T0, T1, T2)
 {
 }
 
 impl<
-        TS: Strategy,
+        TS: Strategy  + 'static,
         T0: Resolvable<TS>,
         T1: Resolvable<TS>,
         T2: Resolvable<TS>,
@@ -203,7 +203,7 @@ impl<
     }
 }
 impl<
-        TS: Strategy,
+        TS: Strategy  + 'static,
         T0: Resolvable<TS>,
         T1: Resolvable<TS>,
         T2: Resolvable<TS>,
@@ -212,7 +212,7 @@ impl<
 {
 }
 
-impl<TS: Strategy> SealedResolvable<TS> for WeakServiceProvider<TS> {
+impl<TS: Strategy + 'static> SealedResolvable<TS> for WeakServiceProvider<TS> {
     // Doesn't make sense to call from the outside
     type Item = ();
     type ItemPreChecked = Self;
@@ -233,10 +233,10 @@ impl<TS: Strategy> SealedResolvable<TS> for WeakServiceProvider<TS> {
         empty()
     }
 }
-impl<TS: Strategy> Resolvable<TS> for WeakServiceProvider<TS> {}
+impl<TS: Strategy + 'static> Resolvable<TS> for WeakServiceProvider<TS> {}
 
 /// pos must be a valid index in provider.producers
-pub(crate) unsafe fn resolve_unchecked<TS: Strategy, T: Identifyable<TS::Id>>(
+pub(crate) unsafe fn resolve_unchecked<TS: Strategy  + 'static, T: Identifyable<TS::Id>>(
     provider: &ServiceProvider<TS>,
     pos: usize,
 ) -> T {
@@ -245,7 +245,7 @@ pub(crate) unsafe fn resolve_unchecked<TS: Strategy, T: Identifyable<TS::Id>>(
     entry.execute::<T>(provider)
 }
 
-impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegistered<T> {
+impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegistered<T> {
     type Item = ServiceIterator<T, TS>;
     type ItemPreChecked = ServiceIterator<T, TS>;
     type PrecheckResult = ();
@@ -287,9 +287,9 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegister
         }
     }
 }
-impl<TS: Strategy, T: Identifyable<TS::Id>> Resolvable<TS> for AllRegistered<T> {}
+impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for AllRegistered<T> {}
 
-impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for Registered<T> {
+impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for Registered<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
     type PrecheckResult = usize;
@@ -323,7 +323,7 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for Registered<
         once(position)
     }
 }
-impl<TS: Strategy, T: Identifyable<TS::Id>> Resolvable<TS> for Registered<T> {}
+impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for Registered<T> {}
 #[cfg(test)]
 mod tests {
     use core::any::TypeId;
