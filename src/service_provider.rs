@@ -1,9 +1,9 @@
 use crate::{
     binary_search,
     strategy::{Identifyable, Strategy},
-    untyped::UntypedFn,
-    AllRegistered, AnyStrategy, Registered, Resolvable, ServiceProducer, TypeNamed,
-    UntypedFnFactory, UntypedFnFactoryContext, BuildError,
+    untyped::{AutoFreePointer, UntypedFn},
+    AllRegistered, AnyStrategy, BuildError, Registered, Resolvable, ServiceProducer, TypeNamed,
+    UntypedFnFactory, UntypedFnFactoryContext,
 };
 use alloc::{
     boxed::Box,
@@ -52,7 +52,6 @@ impl<TS: Strategy> Drop for ServiceProvider<TS> {
         }
 
         let mut swapped_service_states = Arc::new(ServiceProviderMutableState {
-            // Todo: Just swap shared_services?
             base: None,
             shared_services: Vec::new(),
         });
@@ -141,30 +140,24 @@ impl<TS: Strategy> ServiceProvider<TS> {
         }
     }
 
-    pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>() -> UntypedFnFactory<TS> {
-        extern fn factory<T: Identifyable<TS::Id> + Clone + 'static + Send + Sync, TS: Strategy>(_: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
-            let creator: Box<dyn Fn(&ServiceProvider<TS>) -> T> = Box::new(|provider| match &provider.service_states.base {
-                Some(x) => x.downcast_ref::<T>().unwrap().clone(),
-                None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
-            });
-            Ok(creator.into())
-        }
-        extern fn dropper(_inner_ctx: usize) {
-        }
-
-        UntypedFnFactory {
-            creator: factory::<T, TS>,
-            dropper,
-            outer_context: 0
-        }/*
-        Box::new(|_service_state_counter| {
-            let creator: Box<dyn Fn(&ServiceProvider<TS>) -> T> =
-                Box::new(|provider| match &provider.service_states.base {
+    pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
+    ) -> UntypedFnFactory<TS> {
+        extern "C" fn factory<
+            T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
+            TS: Strategy,
+        >(
+            stage_1_data: AutoFreePointer,
+            _ctx: &mut UntypedFnFactoryContext<TS>,
+        ) -> Result<UntypedFn<TS>, BuildError<TS>> {
+            let creator: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
+                |provider, _stage_2_data| match &provider.service_states.base {
                     Some(x) => x.downcast_ref::<T>().unwrap().clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
-                });
-            Ok(creator.into())
-        }) */
+                };
+            Ok((creator, stage_1_data).into())
+        }
+
+        UntypedFnFactory::no_alloc(0, factory::<T, TS>)
     }
 
     pub(crate) fn get_or_initialize_pos<T: Any + Send + Sync, TFn: Fn() -> Arc<T>>(
@@ -201,7 +194,7 @@ impl<TS: Strategy> WeakServiceProvider<TS> {
 
     /// Reference for Arc<self> must be kept for the entire lifetime of the new ServiceProvider
     pub(crate) unsafe fn clone_producers(&self) -> impl Iterator<Item = ServiceProducer<TS>> {
-        type OuteContextType<TS> = (&'static UntypedFn<TS>, &'static WeakServiceProvider<TS>);
+        type OuterContextType<TS> = (&'static UntypedFn<TS>, &'static WeakServiceProvider<TS>);
         let static_self = &*(self as *const Self);
         static_self
             .0
@@ -211,25 +204,18 @@ impl<TS: Strategy> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern fn factory<TS: Strategy>(outer_ctx: &mut usize, ctx: &mut UntypedFnFactoryContext<TS>) -> Result<UntypedFn<TS>, BuildError<TS>> {
-                    let context = *outer_ctx;
-                    *outer_ctx = 0;
+                extern "C" fn factory<TS: Strategy>(
+                    outer_ctx: AutoFreePointer,
+                    _: &mut UntypedFnFactoryContext<TS>,
+                ) -> Result<UntypedFn<TS>, BuildError<TS>> {
+                    let ptr = outer_ctx.get_pointer() as *mut OuterContextType<TS>;
                     unsafe {
-                        let (parent_producer, static_self) = *Box::from_raw(context as *mut OuteContextType<TS>);
-                        Ok(parent_producer.bind(&static_self.0))                    
+                        let (parent_producer, static_self) = *Box::from_raw(ptr);
+                        Ok(parent_producer.bind(&static_self.0))
                     }
                 }
-                extern fn dropper<TS: Strategy>(inner_ctx: usize) {
-                    if inner_ctx != 0 {
-                        drop(unsafe { Box::from_raw(inner_ctx as *mut OuteContextType<TS>)})
-                    }
-                }
-                let boxed: Box<OuteContextType<TS>> = Box::new((parent_producer, static_self));
-                let factory = UntypedFnFactory {
-                    creator: factory::<TS>,
-                    dropper: dropper::<TS>,
-                    outer_context: Box::into_raw(boxed) as usize
-                };
+                let factory =
+                    UntypedFnFactory::boxed((parent_producer, static_self), factory::<TS>);
                 ServiceProducer::<TS>::new_with_type(factory, *parent_type)
             })
     }

@@ -1,9 +1,13 @@
-use std::{ffi::CStr, hash::{Hasher, Hash}};
-
-use abi_stable::{StableAbi, type_layout::{ModPath, TypeLayout}};
+use abi_stable::{
+    type_layout::{ModPath, TypeLayout},
+    StableAbi,
+};
+use std::{
+    ffi::CStr,
+    hash::{Hash, Hasher},
+};
 
 use crate::strategy::Identifyable;
-
 
 #[derive(Debug)]
 pub struct StableAbiStrategy {}
@@ -17,7 +21,7 @@ pub struct StableAbiTypeId {
     name: &'static str,
     version: &'static str,
     path: &'static CStr,
-    child_name_hash: u64
+    child_name_hash: u64,
 }
 
 impl<T: StableAbi + 'static> Identifyable<StableAbiTypeId> for T {
@@ -38,12 +42,12 @@ fn get_layout_typeid(layout: &'static TypeLayout) -> StableAbiTypeId {
     // TraitObjects in RBox and RArc have the same type_id otherwise
     let mut hasher = Djb2::default();
     hash_child_layout_names(&mut hasher, layout);
-    
+
     StableAbiTypeId {
         name: layout.name(),
         version: layout.item_info().package_and_version().1,
         path: path_str,
-        child_name_hash:  hasher.finish()
+        child_name_hash: hasher.finish(),
     }
 }
 
@@ -61,7 +65,10 @@ impl Hasher for Djb2 {
 
     fn write(&mut self, bytes: &[u8]) {
         for byte in bytes {
-            self.0 = ((self.0 << 5).overflowing_add(self.0)).0.overflowing_add(*byte as u64).0; /* hash * 33 + c */
+            self.0 = ((self.0 << 5).overflowing_add(self.0))
+                .0
+                .overflowing_add(*byte as u64)
+                .0; /* hash * 33 + c */
         }
     }
 }
@@ -78,10 +85,13 @@ fn hash_child_layout_names(hasher: &mut Djb2, layout: &TypeLayout) {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::CString;
-    use abi_stable::{std_types::{RArc, RBox}, erased_types::TD_Opaque};
-    use crate::{GenericServiceCollection, Registered};
     use super::*;
+    use crate::{GenericServiceCollection, Registered};
+    use abi_stable::{
+        erased_types::TD_Opaque,
+        std_types::{RArc, RBox},
+    };
+    use std::ffi::CString;
 
     #[test]
     fn assert_valid_path() {
@@ -99,11 +109,13 @@ mod tests {
 
     #[derive(StableAbi)]
     #[repr(C)]
-    struct Foo{
-        no: RArc<i32>
+    struct Foo {
+        no: RArc<i32>,
     }
 
-    struct BarStableAbiImpl { no: i32 }
+    struct BarStableAbiImpl {
+        no: i32,
+    }
     impl BarStableAbi for BarStableAbiImpl {
         fn get_no(&self) -> i32 {
             self.no
@@ -113,8 +125,13 @@ mod tests {
     #[test]
     fn resolve_ffi_service() {
         let mut col = GenericServiceCollection::<StableAbiStrategy>::new();
-        col.with::<Registered<BarStableAbi_TO<RArc<()>>>>().register(|no| Foo { no: RArc::new(no.get_no()) });
-        col.register(|| BarStableAbi_TO::from_ptr(RArc::new(BarStableAbiImpl { no: 42}), TD_Opaque));
+        col.with::<Registered<BarStableAbi_TO<RArc<()>>>>()
+            .register(|no| Foo {
+                no: RArc::new(no.get_no()),
+            });
+        col.register(|| {
+            BarStableAbi_TO::from_ptr(RArc::new(BarStableAbiImpl { no: 42 }), TD_Opaque)
+        });
         let provider = col.build().expect("dependencies are ok");
         let foo: Option<Foo> = provider.get();
         assert_eq!(Some(42), foo.map(|x| *x.no))
@@ -123,8 +140,13 @@ mod tests {
     #[test]
     fn should_raise_missing_dependency() {
         let mut col = GenericServiceCollection::<StableAbiStrategy>::new();
-        col.with::<Registered<BarStableAbi_TO<RBox<()>>>>().register(|no| Foo { no: RArc::new(no.get_no()) });
-        col.register(|| BarStableAbi_TO::from_ptr(RArc::new(BarStableAbiImpl { no: 42 }), TD_Opaque));        
+        col.with::<Registered<BarStableAbi_TO<RBox<()>>>>()
+            .register(|no| Foo {
+                no: RArc::new(no.get_no()),
+            });
+        col.register(|| {
+            BarStableAbi_TO::from_ptr(RArc::new(BarStableAbiImpl { no: 42 }), TD_Opaque)
+        });
         col.build().expect_err("should have missing dependency");
     }
 }

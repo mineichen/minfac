@@ -240,11 +240,9 @@ pub(crate) unsafe fn resolve_unchecked<TS: Strategy, T: Identifyable<TS::Id>>(
     provider: &ServiceProvider<TS>,
     pos: usize,
 ) -> T {
-    ({
-        let entry = provider.get_producers().get_unchecked(pos);
-        debug_assert_eq!(entry.get_result_type_id(), &T::get_id());
-        entry.borrow_for::<T>()
-    })(provider)
+    let entry = provider.get_producers().get_unchecked(pos);
+    debug_assert_eq!(entry.get_result_type_id(), &T::get_id());
+    entry.execute::<T>(provider)
 }
 
 impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegistered<T> {
@@ -280,8 +278,7 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegister
 
         match first {
             Some(x) => {
-                let to = binary_search::binary_search_last_by_key(&types[x..], &id, |f| f)
-                    .unwrap()
+                let to = binary_search::binary_search_last_by_key(&types[x..], &id, |f| f).unwrap()
                     + x
                     + 1;
                 x..to

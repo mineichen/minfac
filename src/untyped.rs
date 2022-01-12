@@ -4,26 +4,27 @@ use crate::{
 };
 use alloc::boxed::Box;
 
-#[derive(Clone)]
+#[repr(C)]
 pub struct UntypedFn<TS: Strategy> {
-    result_type_id: TS::Id, // Todo: Debug only
-    pointer: *mut dyn Fn(),
-    wrapper_creator: unsafe fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
+    result_type_id: TS::Id,
+    pointer: usize,
+    context: AutoFreePointer,
+    wrapper_creator:
+        unsafe extern "C" fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
 }
 
 unsafe impl<TS: Strategy> Send for UntypedFn<TS> {}
 unsafe impl<TS: Strategy> Sync for UntypedFn<TS> {}
 
 impl<TS: Strategy> UntypedFn<TS> {
-    // Todo: Debug only
     pub fn get_result_type_id(&self) -> &TS::Id {
         &self.result_type_id
     }
 
     // Unsafe constraint: Must be called with the same T as it was created
-    pub unsafe fn borrow_for<T>(&self) -> &dyn Fn(&ServiceProvider<TS>) -> T {
-        // debug_assert_eq!(TypeId::of::<T>(), self.result_type_id, "This is likely a bug in minfac itself. Please file a bug report to overcome this issue");
-        &*(self.pointer as *const dyn Fn(&ServiceProvider<TS>) -> T)
+    pub unsafe fn execute<T>(&self, provider: &ServiceProvider<TS>) -> T {
+        let lambda: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T = std::mem::transmute(self.pointer);
+        (lambda)(provider, &self.context)
     }
 
     /// Creates a UntypedFn which ignores it's passed ServiceProvider and always uses the one it's bound to
@@ -34,25 +35,64 @@ impl<TS: Strategy> UntypedFn<TS> {
     }
 }
 
-impl<TS: Strategy, T> From<Box<dyn Fn(&ServiceProvider<TS>) -> T>> for UntypedFn<TS>
+impl<TS: Strategy, T> From<(fn(&ServiceProvider<TS>, &AutoFreePointer) -> T, AutoFreePointer)> for UntypedFn<TS>
 where
     T: Identifyable<TS::Id>,
 {
-    fn from(factory: Box<dyn Fn(&ServiceProvider<TS>) -> T>) -> Self {
+    fn from(
+        (factory, stage1_context): (fn(&ServiceProvider<TS>, &AutoFreePointer) -> T, AutoFreePointer),
+    ) -> Self {
+        type InnerContext<TS> = (*const UntypedFn<TS>, *const ServiceProvider<TS>);
+        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy>(
+            inner: *const UntypedFn<TS>,
+            provider: *const ServiceProvider<TS>,
+        ) -> UntypedFn<TS> {
+            let factory: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
+                |_ignored_provider, context| unsafe {
+                    let (inner, provider) = &*(context.get_pointer() as *mut InnerContext<TS>);
+                    (&**inner).execute::<T>(&**provider)
+                };
+            let inner : InnerContext<TS> = (inner, provider);
+            (factory, AutoFreePointer::boxed(inner)).into()
+        }
         UntypedFn {
             result_type_id: T::get_id(),
-            pointer: Box::into_raw(factory) as *mut dyn Fn(),
-            wrapper_creator: |inner, provider| {
-                let factory: Box<dyn Fn(&ServiceProvider<TS>) -> T> =
-                    Box::new(move |_| unsafe { ((&*inner).borrow_for::<T>())(&*provider) });
-                factory.into()
-            },
+            context: stage1_context,
+            pointer: factory as usize,
+            wrapper_creator: wrapper_creator::<T, TS>,
         }
     }
 }
 
-impl<TS: Strategy> Drop for UntypedFn<TS> {
+#[repr(C)]
+pub struct AutoFreePointer {
+    dropper: extern "C" fn(outer_context: usize),
+    context: usize,
+}
+
+impl AutoFreePointer {
+    pub fn no_alloc(context: usize) -> Self {
+        extern "C" fn dropper(_: usize) {}
+        Self { dropper, context }
+    }
+    pub fn boxed<T>(input: T) -> Self {
+        extern "C" fn dropper<T>(u: usize) {
+            if u != 0 {
+                drop(unsafe { Box::from_raw(u as *mut T) })
+            }
+        }
+        Self {
+            dropper: dropper::<T>,
+            context: Box::into_raw(Box::new(input)) as usize,
+        }
+    }
+    pub fn get_pointer(&self) -> usize {
+        self.context
+    }
+}
+
+impl Drop for AutoFreePointer {
     fn drop(&mut self) {
-        drop(unsafe { Box::from_raw(self.pointer) });
+        (self.dropper)(self.context)
     }
 }
