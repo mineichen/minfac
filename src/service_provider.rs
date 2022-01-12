@@ -30,7 +30,7 @@ pub struct ServiceProvider<TS: Strategy + 'static = AnyStrategy> {
     is_root: bool,
 }
 
-impl<TS: Strategy  + 'static> Debug for ServiceProvider<TS> {
+impl<TS: Strategy + 'static> Debug for ServiceProvider<TS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!(
             "ServiceProvider (services: {}, with_state: {})",
@@ -45,7 +45,7 @@ impl<TS: Strategy  + 'static> Debug for ServiceProvider<TS> {
 /// which have a dependency to ServiceProvider or ServiceIterators<T>, which are using ServiceProvider internally)
 #[cfg(debug_assertions)]
 #[allow(clippy::needless_collect)]
-impl<TS: Strategy  + 'static> Drop for ServiceProvider<TS> {
+impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
     fn drop(&mut self) {
         if !self.is_root {
             return;
@@ -101,7 +101,7 @@ impl<TS: Strategy  + 'static> Drop for ServiceProvider<TS> {
     }
 }
 
-impl<TS: Strategy  + 'static> ServiceProvider<TS> {
+impl<TS: Strategy + 'static> ServiceProvider<TS> {
     pub fn resolve_unchecked<T: Resolvable<TS>>(&self) -> T::ItemPreChecked {
         let precheck_key =
             T::precheck(&self.immutable_state.types).expect("Resolve unkwnown service");
@@ -144,7 +144,7 @@ impl<TS: Strategy  + 'static> ServiceProvider<TS> {
     ) -> UntypedFnFactory<TS> {
         extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
-            TS: Strategy  + 'static,
+            TS: Strategy + 'static,
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
@@ -204,13 +204,13 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern "C" fn factory<TS: Strategy  + 'static>(
+                extern "C" fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> Result<UntypedFn<TS>, BuildError<TS>> {
                     let ptr = outer_ctx.get_pointer() as *mut OuterContextType<TS>;
                     unsafe {
-                        let (parent_producer, static_self) = *Box::from_raw(ptr);
+                        let (parent_producer, static_self) = &*ptr;
                         Ok(parent_producer.bind(&static_self.0))
                     }
                 }
@@ -235,7 +235,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
     }
 }
 
-impl<TS: Strategy  + 'static> Clone for WeakServiceProvider<TS> {
+impl<TS: Strategy + 'static> Clone for WeakServiceProvider<TS> {
     fn clone(&self) -> Self {
         Self(ServiceProvider::<TS> {
             immutable_state: self.0.immutable_state.clone(),
@@ -246,7 +246,7 @@ impl<TS: Strategy  + 'static> Clone for WeakServiceProvider<TS> {
     }
 }
 
-impl<'a, TS: Strategy  + 'static> From<&'a ServiceProvider<TS>> for WeakServiceProvider<TS> {
+impl<'a, TS: Strategy + 'static> From<&'a ServiceProvider<TS>> for WeakServiceProvider<TS> {
     fn from(provider: &'a ServiceProvider<TS>) -> Self {
         WeakServiceProvider(ServiceProvider {
             immutable_state: provider.immutable_state.clone(),
@@ -257,14 +257,14 @@ impl<'a, TS: Strategy  + 'static> From<&'a ServiceProvider<TS>> for WeakServiceP
     }
 }
 
-pub(crate) struct ServiceProviderImmutableState<TS: Strategy  + 'static> {
+pub(crate) struct ServiceProviderImmutableState<TS: Strategy + 'static> {
     types: Vec<TS::Id>,
     producers: Vec<UntypedFn<TS>>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
     _parents: Vec<WeakServiceProvider<TS>>,
 }
 
-impl<TS: Strategy  + 'static> ServiceProviderImmutableState<TS> {
+impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
     pub(crate) fn new(
         types: Vec<TS::Id>,
         producers: Vec<UntypedFn<TS>>,
@@ -292,7 +292,7 @@ pub struct ServiceIterator<T, TS: Strategy + 'static = AnyStrategy> {
     item_type: PhantomData<T>,
 }
 
-impl<T, TS: Strategy  + 'static> ServiceIterator<T, TS> {
+impl<T, TS: Strategy + 'static> ServiceIterator<T, TS> {
     pub(crate) fn new(provider: WeakServiceProvider<TS>, next_pos: Option<usize>) -> Self {
         Self {
             provider,
@@ -302,7 +302,7 @@ impl<T, TS: Strategy  + 'static> ServiceIterator<T, TS> {
     }
 }
 
-impl<'a, TS: Strategy  + 'static, T: Identifyable<TS::Id>> Iterator for ServiceIterator<T, TS> {
+impl<'a, TS: Strategy + 'static, T: Identifyable<TS::Id>> Iterator for ServiceIterator<T, TS> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -3,11 +3,14 @@ use core::{
     fmt::Debug,
 };
 
+use crate::{untyped::UntypedFn, BuildError};
+
 #[cfg_attr(feature = "stable_abi", abi_stable::sabi_trait)]
 pub trait Strategy: Debug + Send + Sync {
     type Id: Ord + Debug + Copy + PartialEq + Eq;
 }
 
+trait Result {}
 
 pub trait Identifyable<T: Ord>: 'static {
     fn get_id() -> T;

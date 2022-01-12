@@ -75,12 +75,12 @@ pub struct GenericServiceCollection<TS: Strategy + 'static> {
 
 /// Alias builder is used to register services, which depend on the previous service.
 /// This is especially useful, if the previous service contains an anonymous type like a lambda
-pub struct AliasBuilder<'a, T: ?Sized, TS: Strategy  + 'static>(
+pub struct AliasBuilder<'a, T: ?Sized, TS: Strategy + 'static>(
     Rc<RefCell<&'a mut GenericServiceCollection<TS>>>,
     PhantomData<T>,
 );
 
-impl<'a, T: Identifyable<TS::Id>, TS: Strategy  + 'static> AliasBuilder<'a, T, TS> {
+impl<'a, T: Identifyable<TS::Id>, TS: Strategy + 'static> AliasBuilder<'a, T, TS> {
     fn new(col: &'a mut GenericServiceCollection<TS>) -> Self {
         Self(Rc::new(RefCell::new(col)), PhantomData)
     }
@@ -107,12 +107,12 @@ impl<'a, T: Identifyable<TS::Id>, TS: Strategy  + 'static> AliasBuilder<'a, T, T
     }
 }
 
-struct ServiceProducer<TS: Strategy  + 'static> {
+struct ServiceProducer<TS: Strategy + 'static> {
     identifier: TS::Id,
     factory: UntypedFnFactory<TS>,
 }
 
-impl<TS: Strategy  + 'static> ServiceProducer<TS> {
+impl<TS: Strategy + 'static> ServiceProducer<TS> {
     fn new<T: Identifyable<TS::Id>>(factory: UntypedFnFactory<TS>) -> Self {
         Self::new_with_type(factory, T::get_id())
     }
@@ -129,12 +129,12 @@ type UntypedFnFactoryCreator<TS> = extern "C" fn(
     inner_context: &mut UntypedFnFactoryContext<TS>,
 ) -> Result<UntypedFn<TS>, BuildError<TS>>;
 
-struct UntypedFnFactory<TS: Strategy  + 'static> {
+struct UntypedFnFactory<TS: Strategy + 'static> {
     creator: UntypedFnFactoryCreator<TS>,
     context: AutoFreePointer,
 }
 
-impl<TS: Strategy  + 'static> UntypedFnFactory<TS> {
+impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
     fn no_alloc(context: usize, creator: UntypedFnFactoryCreator<TS>) -> Self {
         Self {
             creator: creator,
@@ -152,14 +152,14 @@ impl<TS: Strategy  + 'static> UntypedFnFactory<TS> {
     }
 }
 
-struct UntypedFnFactoryContext<'a, TS: Strategy  + 'static> {
+struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
     final_ordered_types: &'a Vec<TS::Id>,
     cyclic_reference_candidates: &'a mut BTreeMap<usize, CycleCheckerValue>,
 }
 
-impl<'a, TS: Strategy  + 'static> UntypedFnFactoryContext<'a, TS> {
+impl<'a, TS: Strategy + 'static> UntypedFnFactoryContext<'a, TS> {
     fn reserve_state_space(&mut self) -> usize {
         let result: usize = *self.state_counter;
         *self.state_counter += 1;
@@ -181,13 +181,13 @@ impl<'a, TS: Strategy  + 'static> UntypedFnFactoryContext<'a, TS> {
     }
 }
 
-impl<TS: Strategy  + 'static> Default for GenericServiceCollection<TS> {
+impl<TS: Strategy + 'static> Default for GenericServiceCollection<TS> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
+impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     /// Creates an empty ServiceCollection
     pub fn new() -> Self {
         Self {
@@ -231,14 +231,15 @@ impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
     ) {
         extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
-            TS: Strategy  + 'static,
+            TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> Result<UntypedFn<TS>, BuildError<TS>> {
             let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |_: &ServiceProvider<TS>, _outer_ctx| 
-                    unsafe { &*(_outer_ctx.get_pointer() as *mut T) }.clone();
+                |_: &ServiceProvider<TS>, _outer_ctx| {
+                    unsafe { &*(_outer_ctx.get_pointer() as *mut T) }.clone()
+                };
             Ok((func, outer_ctx).into())
         }
 
@@ -250,10 +251,10 @@ impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy  + 'static>(
+        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
-        ) -> Result<UntypedFn<TS>, BuildError<TS>> {            
+        ) -> Result<UntypedFn<TS>, BuildError<TS>> {
             let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
                 |_: &ServiceProvider<TS>, stage_2_data| {
                     let ptr = stage_2_data.get_pointer();
@@ -282,7 +283,7 @@ impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
         Arc<T>: Identifyable<TS::Id>,
     {
         type InnerContext = (usize, usize);
-        extern "C" fn factory<T: Send + Sync, TS: Strategy  + 'static>(
+        extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> Result<UntypedFn<TS>, BuildError<TS>>
@@ -290,14 +291,15 @@ impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
             Arc<T>: Identifyable<TS::Id>,
         {
             let service_state_idx = ctx.reserve_state_space();
-            
+
             let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> Arc<T> =
                 |provider: &ServiceProvider<TS>, outer_ctx| {
-                    let (service_state_idx, fnptr) = unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext)};
+                    let (service_state_idx, fnptr) =
+                        unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext) };
                     let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
                     provider.get_or_initialize_pos(*service_state_idx, creator)
                 };
-            let inner: InnerContext = (service_state_idx, outer_ctx.get_pointer()); 
+            let inner: InnerContext = (service_state_idx, outer_ctx.get_pointer());
             Ok((func, AutoFreePointer::boxed(inner)).into())
         }
 
@@ -404,7 +406,7 @@ impl<TS: Strategy  + 'static> GenericServiceCollection<TS> {
     }
 }
 
-pub(crate) struct ProducerValidationResult<TS: Strategy  + 'static> {
+pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
     producers: Vec<UntypedFn<TS>>,
     types: Vec<TS::Id>,
     service_states_count: usize,
@@ -462,7 +464,7 @@ pub enum BuildError<TS: Strategy + Debug> {
     CyclicDependency { description: String },
 }
 
-impl<TS: Strategy  + 'static> BuildError<TS> {
+impl<TS: Strategy + 'static> BuildError<TS> {
     fn new_missing_dependency<T: Identifyable<TS::Id>>() -> Self {
         BuildError::MissingDependency {
             name: type_name::<T>(),
@@ -486,7 +488,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         extern "C" fn factory<
             T: Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
-            TS: Strategy  + 'static,
+            TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
@@ -497,13 +499,13 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |provider, _outer_ctx| {
-                    let (key, c) : &InnerContext<TDep, TS> = unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>)};
-                    let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
-                    let arg = TDep::resolve_prechecked(provider, key);
-                    creator(arg)
-                };
+            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T = |provider, _outer_ctx| {
+                let (key, c): &InnerContext<TDep, TS> =
+                    unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
+                let arg = TDep::resolve_prechecked(provider, key);
+                creator(arg)
+            };
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer());
             Ok((func, AutoFreePointer::boxed(inner)).into())
         }
@@ -521,8 +523,13 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
     where
         Arc<T>: Identifyable<TS::Id>,
     {
-        type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
-        extern "C" fn factory<T: Send + Sync, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static>(
+        type InnerContext<TDep, TS> =
+            (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
+        extern "C" fn factory<
+            T: Send + Sync,
+            TDep: Resolvable<TS> + 'static,
+            TS: Strategy + 'static,
+        >(
             outer_ctx: AutoFreePointer,
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> Result<UntypedFn<TS>, BuildError<TS>>
@@ -537,11 +544,11 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             );
             let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> Arc<T> =
                 |provider, _outer_ctx| {
-                    
-                    let (key, c, service_state_idx) : &InnerContext<TDep, TS> = unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>)};
+                    let (key, c, service_state_idx): &InnerContext<TDep, TS> =
+                        unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
                     provider.get_or_initialize_pos(*service_state_idx, || {
-                    
-                        let creator: fn(TDep::ItemPreChecked) -> Arc<T> = unsafe { std::mem::transmute(*c) };
+                        let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
+                            unsafe { std::mem::transmute(*c) };
                         creator(TDep::resolve_prechecked(provider, key))
                     })
                 };

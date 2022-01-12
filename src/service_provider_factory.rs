@@ -30,12 +30,12 @@ pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy + 'static
     anticipated: PhantomData<T>,
 }
 
-pub struct ServiceProviderFactoryBuilder<TS: Strategy  + 'static> {
+pub struct ServiceProviderFactoryBuilder<TS: Strategy + 'static> {
     collection: GenericServiceCollection<TS>,
     providers: Vec<WeakServiceProvider<TS>>,
 }
 
-impl<TS: Strategy  + 'static> ServiceProviderFactoryBuilder<TS> {
+impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
     pub fn create(
         collection: GenericServiceCollection<TS>,
         first_parent: WeakServiceProvider<TS>,
@@ -52,7 +52,9 @@ impl<TS: Strategy  + 'static> ServiceProviderFactoryBuilder<TS> {
     }
 }
 
-impl<TS: Strategy  + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync> ServiceProviderFactory<T, TS> {
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
+    ServiceProviderFactory<T, TS>
+{
     pub fn create(
         mut collection: GenericServiceCollection<TS>,
         parents: Vec<WeakServiceProvider<TS>>,
@@ -123,7 +125,7 @@ mod tests {
             sync::atomic::{AtomicI32, Ordering},
         },
     };
-/*
+
     #[test]
     fn services_are_returned_in_correct_order() {
         let mut parent_collection = ServiceCollection::new();
@@ -143,7 +145,7 @@ mod tests {
 
         assert_eq!(alloc::vec!(0, 1, 2), iterator.collect::<Vec<_>>());
     }
-    
+
     #[test]
     fn uses_same_parent_arc_for_two_providers_from_the_same_child_factory() {
         let mut parent_provider = ServiceCollection::new();
@@ -164,7 +166,7 @@ mod tests {
         let child2_value = child_factory.build(2).get::<Arc<AtomicI32>>().unwrap();
         child1_value.fetch_add(1, Ordering::Relaxed);
         assert_eq!(43, child2_value.load(Ordering::Relaxed));
-    }*/
+    }
 
     #[test]
     #[cfg_attr(miri, ignore)]

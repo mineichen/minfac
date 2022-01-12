@@ -66,7 +66,9 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for () {
 }
 impl<TS: Strategy + 'static> Resolvable<TS> for () {}
 
-impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResolvable<TS> for (T0, T1) {
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResolvable<TS>
+    for (T0, T1)
+{
     type Item = (T0::Item, T1::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked);
     type PrecheckResult = (T0::PrecheckResult, T1::PrecheckResult);
@@ -96,10 +98,10 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResol
         T0::iter_positions(types).chain(T1::iter_positions(types))
     }
 }
-impl<TS: Strategy  + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> Resolvable<TS> for (T0, T1) {}
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> Resolvable<TS> for (T0, T1) {}
 
-impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> SealedResolvable<TS>
-    for (T0, T1, T2)
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>>
+    SealedResolvable<TS> for (T0, T1, T2)
 {
     type Item = (T0::Item, T1::Item, T2::Item);
     type ItemPreChecked = (T0::ItemPreChecked, T1::ItemPreChecked, T2::ItemPreChecked);
@@ -137,13 +139,13 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolva
             .chain(T2::iter_positions(types))
     }
 }
-impl<TS: Strategy  + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>> Resolvable<TS>
-    for (T0, T1, T2)
+impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolvable<TS>>
+    Resolvable<TS> for (T0, T1, T2)
 {
 }
 
 impl<
-        TS: Strategy  + 'static,
+        TS: Strategy + 'static,
         T0: Resolvable<TS>,
         T1: Resolvable<TS>,
         T2: Resolvable<TS>,
@@ -203,7 +205,7 @@ impl<
     }
 }
 impl<
-        TS: Strategy  + 'static,
+        TS: Strategy + 'static,
         T0: Resolvable<TS>,
         T1: Resolvable<TS>,
         T2: Resolvable<TS>,
@@ -236,7 +238,7 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for WeakServiceProvider<TS> {
 impl<TS: Strategy + 'static> Resolvable<TS> for WeakServiceProvider<TS> {}
 
 /// pos must be a valid index in provider.producers
-pub(crate) unsafe fn resolve_unchecked<TS: Strategy  + 'static, T: Identifyable<TS::Id>>(
+pub(crate) unsafe fn resolve_unchecked<TS: Strategy + 'static, T: Identifyable<TS::Id>>(
     provider: &ServiceProvider<TS>,
     pos: usize,
 ) -> T {
@@ -245,7 +247,7 @@ pub(crate) unsafe fn resolve_unchecked<TS: Strategy  + 'static, T: Identifyable<
     entry.execute::<T>(provider)
 }
 
-impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegistered<T> {
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for AllRegistered<T> {
     type Item = ServiceIterator<T, TS>;
     type ItemPreChecked = ServiceIterator<T, TS>;
     type PrecheckResult = ();
@@ -287,9 +289,9 @@ impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for 
         }
     }
 }
-impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for AllRegistered<T> {}
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for AllRegistered<T> {}
 
-impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for Registered<T> {
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for Registered<T> {
     type Item = Option<T>;
     type ItemPreChecked = T;
     type PrecheckResult = usize;
@@ -323,7 +325,7 @@ impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for 
         once(position)
     }
 }
-impl<TS: Strategy  + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for Registered<T> {}
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for Registered<T> {}
 #[cfg(test)]
 mod tests {
     use core::any::TypeId;
