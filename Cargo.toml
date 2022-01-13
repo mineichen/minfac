@@ -12,10 +12,9 @@ edition = "2021"
 
 [dependencies]
 once_cell = { version = "1.5", features = []}
-abi_stable = { version = "0.10", default-features = false, optional = true } 
-fn_ffi = { path = "../fn_ffi" }
+abi_stable = { version = "0.10", default-features = false } 
 
 [features]
-default = ["std"]
-stable_abi = ["fn_ffi/abi_stable", "abi_stable" ]
+default = ["std"] # Currently broken without std (dependency for abi_stable)
+stable_abi = []
 std = []

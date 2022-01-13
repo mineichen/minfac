@@ -2,9 +2,10 @@ use crate::{
     binary_search,
     strategy::{Identifyable, Strategy},
     untyped::{AutoFreePointer, UntypedFn},
-    AllRegistered, AnyStrategy, BuildError, Registered, Resolvable, ServiceProducer, TypeNamed,
-    UntypedFnFactory, UntypedFnFactoryContext,
+    AllRegistered, AnyStrategy, Registered, Resolvable, ServiceProducer, TypeNamed,
+    UntypedFnFactory, UntypedFnFactoryContext, InternalBuildResult,
 };
+use abi_stable::std_types::{RArc, RVec};
 use alloc::{
     boxed::Box,
     sync::{Arc, Weak},
@@ -24,8 +25,8 @@ use once_cell::sync::OnceCell;
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
 /// dropping the original ServiceProvider results in a call to minfac::ERROR_HANDLER, which panics in std and enabled debug_assertions
 pub struct ServiceProvider<TS: Strategy + 'static = AnyStrategy> {
-    immutable_state: Arc<ServiceProviderImmutableState<TS>>,
-    service_states: Arc<ServiceProviderMutableState>,
+    immutable_state: RArc<ServiceProviderImmutableState<TS>>,
+    service_states: RArc<ServiceProviderMutableState>,
     #[cfg(debug_assertions)]
     is_root: bool,
 }
@@ -51,13 +52,13 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
             return;
         }
 
-        let mut swapped_service_states = Arc::new(ServiceProviderMutableState {
+        let mut swapped_service_states = RArc::new(ServiceProviderMutableState {
             base: None,
             shared_services: Vec::new(),
         });
         swap(&mut swapped_service_states, &mut self.service_states);
 
-        match Arc::try_unwrap(swapped_service_states) {
+        match RArc::try_unwrap(swapped_service_states) {
             Ok(service_states) => {
                 let checkers: Vec<_> = service_states
                     .shared_services
@@ -94,7 +95,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
             Err(x) => unsafe {
                 crate::ERROR_HANDLER(&alloc::format!(
                     "Original ServiceProvider was dropped while still beeing used {} times",
-                    Arc::strong_count(&x) - 1
+                    RArc::strong_count(&x) - 1
                 ));
             },
         }
@@ -119,19 +120,19 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
         T::resolve(self)
     }
 
-    pub(crate) fn get_producers(&self) -> &Vec<UntypedFn<TS>> {
+    pub(crate) fn get_producers(&self) -> &RVec<UntypedFn<TS>> {
         &self.immutable_state.producers
     }
 
     pub(crate) fn new(
-        immutable_state: Arc<ServiceProviderImmutableState<TS>>,
+        immutable_state: RArc<ServiceProviderImmutableState<TS>>,
         shared_services: Vec<OnceCell<TypeNamed<Arc<dyn Any + Send + Sync>>>>,
         base: Option<Box<dyn Any + Send + Sync>>,
     ) -> Self {
         Self {
             immutable_state,
 
-            service_states: Arc::new(ServiceProviderMutableState {
+            service_states: RArc::new(ServiceProviderMutableState {
                 shared_services,
                 base,
             }),
@@ -148,13 +149,13 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
-        ) -> Result<UntypedFn<TS>, BuildError<TS>> {
+        ) -> InternalBuildResult<TS> {
             let creator: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
                 |provider, _stage_2_data| match &provider.service_states.base {
                     Some(x) => x.downcast_ref::<T>().unwrap().clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
                 };
-            Ok((creator, stage_1_data).into())
+            Ok((creator, stage_1_data).into()).into()
         }
 
         UntypedFnFactory::no_alloc(0, factory::<T, TS>)
@@ -184,7 +185,10 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 }
 
 /// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
-/// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called
+/// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called.
+/// 
+/// In contrast to std::sync::Arc<T> / std::sync::Weak<T>, WeakServiceProviders prevent
+/// their parent from being vanished, if minfac::ERROR_HANDLER doesn't panic
 pub struct WeakServiceProvider<TS: Strategy + 'static = AnyStrategy>(ServiceProvider<TS>);
 
 impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
@@ -207,11 +211,11 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
                 extern "C" fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
-                ) -> Result<UntypedFn<TS>, BuildError<TS>> {
+                ) -> InternalBuildResult<TS> {
                     let ptr = outer_ctx.get_pointer() as *mut OuterContextType<TS>;
                     unsafe {
                         let (parent_producer, static_self) = &*ptr;
-                        Ok(parent_producer.bind(&static_self.0))
+                        Ok(parent_producer.bind(&static_self.0)).into()
                     }
                 }
                 let factory =
@@ -258,17 +262,17 @@ impl<'a, TS: Strategy + 'static> From<&'a ServiceProvider<TS>> for WeakServicePr
 }
 
 pub(crate) struct ServiceProviderImmutableState<TS: Strategy + 'static> {
-    types: Vec<TS::Id>,
-    producers: Vec<UntypedFn<TS>>,
+    types: RVec<TS::Id>,
+    producers: RVec<UntypedFn<TS>>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
-    _parents: Vec<WeakServiceProvider<TS>>,
+    _parents: RVec<WeakServiceProvider<TS>>,
 }
 
 impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
     pub(crate) fn new(
-        types: Vec<TS::Id>,
-        producers: Vec<UntypedFn<TS>>,
-        _parents: Vec<WeakServiceProvider<TS>>,
+        types: RVec<TS::Id>,
+        producers: RVec<UntypedFn<TS>>,
+        _parents: RVec<WeakServiceProvider<TS>>,
     ) -> Self {
         Self {
             types,

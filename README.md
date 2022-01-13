@@ -25,6 +25,5 @@ assert_eq!(Some(2i16), provider.get::<i16>());
   - Singleton services cannot reference scoped services, as scoped services don't exist
   - Shared services cannot outlive their `ServiceProvider` (checked at runtime when debug_assertions are enabled)
 - `ServiceProvider` implements Send+Sync and is threadsafe without using locks
-- `#[no_std]`
 
 Visit the examples/documentation for more details

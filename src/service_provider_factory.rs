@@ -4,7 +4,8 @@ use crate::{
     AnyStrategy, GenericServiceCollection, ProducerValidationResult, ServiceProducer,
     ServiceProvider, WeakServiceProvider,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use abi_stable::std_types::{RArc, RVec};
+use alloc::{boxed::Box, vec::Vec};
 use core::{clone::Clone, marker::PhantomData};
 use once_cell::sync::OnceCell;
 
@@ -26,13 +27,13 @@ use once_cell::sync::OnceCell;
 /// ```
 pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy + 'static = AnyStrategy> {
     service_states_count: usize,
-    immutable_state: Arc<crate::service_provider::ServiceProviderImmutableState<TS>>,
+    immutable_state: RArc<crate::service_provider::ServiceProviderImmutableState<TS>>,
     anticipated: PhantomData<T>,
 }
 
 pub struct ServiceProviderFactoryBuilder<TS: Strategy + 'static> {
     collection: GenericServiceCollection<TS>,
-    providers: Vec<WeakServiceProvider<TS>>,
+    providers: RVec<WeakServiceProvider<TS>>,
 }
 
 impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
@@ -40,9 +41,11 @@ impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
         collection: GenericServiceCollection<TS>,
         first_parent: WeakServiceProvider<TS>,
     ) -> Self {
+        let mut providers = RVec::with_capacity(1);
+        providers.push(first_parent);
         Self {
             collection,
-            providers: vec![first_parent],
+            providers,
         }
     }
     pub fn build_factory<T: Identifyable<TS::Id> + Clone + Send + Sync>(
@@ -57,7 +60,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
 {
     pub fn create(
         mut collection: GenericServiceCollection<TS>,
-        parents: Vec<WeakServiceProvider<TS>>,
+        parents: RVec<WeakServiceProvider<TS>>,
     ) -> Result<Self, super::BuildError<TS>> {
         let parent_service_factories: Vec<_> = parents
             .iter()
@@ -76,7 +79,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
             service_states_count,
         } = collection.validate_producers(parent_service_factories)?;
 
-        let immutable_state = Arc::new(ServiceProviderImmutableState::<TS>::new(
+        let immutable_state = RArc::new(ServiceProviderImmutableState::<TS>::new(
             types, producers, parents,
         ));
 
@@ -117,6 +120,8 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use {
         super::*,
         crate::{BuildError, Registered, ServiceCollection},

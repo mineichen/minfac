@@ -13,6 +13,7 @@ pub struct UntypedFn<TS: Strategy + 'static> {
         unsafe extern "C" fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
 }
 
+
 unsafe impl<TS: Strategy + 'static> Send for UntypedFn<TS> {}
 unsafe impl<TS: Strategy + 'static> Sync for UntypedFn<TS> {}
 
