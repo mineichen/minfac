@@ -132,7 +132,7 @@ impl<TS: Strategy + 'static> ServiceProducer<TS> {
     }
 }
 
-type UntypedFnFactoryCreator<TS> = extern "C" fn(
+type UntypedFnFactoryCreator<TS> = extern fn(
     outer_context: AutoFreePointer,
     inner_context: &mut UntypedFnFactoryContext<TS>,
 ) -> InternalBuildResult<TS>;
@@ -237,14 +237,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         &mut self,
         instance: T,
     ) {
-        extern "C" fn factory<
+        extern fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern "C" fn func<
+            extern fn func<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -264,11 +264,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+        extern fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+            extern fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
                 _: &ServiceProvider<TS>,
                 stage_2_data: &AutoFreePointer,
             ) -> T {
@@ -298,14 +298,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         Arc<T>: Identifyable<TS::Id>,
     {
         type InnerContext = (usize, usize);
-        extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
+        extern fn factory<T: Send + Sync, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS>
         where
             Arc<T>: Identifyable<TS::Id>,
         {
-            extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
+            extern fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
                 provider: &ServiceProvider<TS>,
                 outer_ctx: &AutoFreePointer,
             ) -> Arc<T> {
@@ -539,7 +539,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         creator: fn(TDep::ItemPreChecked) -> T,
     ) -> AliasBuilder<T, TS> {
         type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, usize);
-        extern "C" fn factory<
+        extern fn factory<
             T: Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -556,7 +556,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            extern "C" fn func<
+            extern fn func<
                 T: Identifyable<TS::Id>,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
@@ -592,7 +592,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
     {
         type InnerContext<TDep, TS> =
             (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
-        extern "C" fn factory<
+        extern fn factory<
             T: Send + Sync,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -612,7 +612,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            extern "C" fn func<
+            extern fn func<
                 T: Send + Sync + 'static,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,

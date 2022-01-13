@@ -143,14 +143,14 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
     ) -> UntypedFnFactory<TS> {
-        extern "C" fn factory<
+        extern fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern "C" fn creator<
+            extern fn creator<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -215,7 +215,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern "C" fn factory<TS: Strategy + 'static>(
+                extern fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> InternalBuildResult<TS> {

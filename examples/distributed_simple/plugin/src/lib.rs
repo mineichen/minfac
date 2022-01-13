@@ -12,7 +12,7 @@ impl interface::Service for PluginService {
 }
 
 #[no_mangle]
-pub extern "C" fn register(collection: &mut ServiceCollection) {
+pub extern fn register(collection: &mut ServiceCollection) {
     println!("plugin: Register Service");
     collection
         .register_shared(|| Arc::new(PluginService))

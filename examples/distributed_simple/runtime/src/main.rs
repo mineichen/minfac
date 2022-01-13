@@ -5,7 +5,7 @@ use {
     std::sync::Arc,
 };
 
-type ServiceRegistrar = unsafe extern "C" fn(&mut minfac::ServiceCollection);
+type ServiceRegistrar = unsafe extern fn(&mut minfac::ServiceCollection);
 
 ///
 /// # Expected output
