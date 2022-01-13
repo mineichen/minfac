@@ -2,8 +2,8 @@ use crate::{
     binary_search,
     strategy::{Identifyable, Strategy},
     untyped::{AutoFreePointer, UntypedFn},
-    AllRegistered, AnyStrategy, Registered, Resolvable, ServiceProducer, TypeNamed,
-    UntypedFnFactory, UntypedFnFactoryContext, InternalBuildResult,
+    AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
+    TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
 use abi_stable::std_types::{RArc, RVec};
 use alloc::{
@@ -150,12 +150,19 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            let creator: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |provider, _stage_2_data| match &provider.service_states.base {
+            extern "C" fn creator<
+                T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
+                TS: Strategy + 'static,
+            >(
+                provider: &ServiceProvider<TS>,
+                _stage_2_data: &AutoFreePointer,
+            ) -> T {
+                match &provider.service_states.base {
                     Some(x) => x.downcast_ref::<T>().unwrap().clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
-                };
-            Ok((creator, stage_1_data).into()).into()
+                }
+            }
+            Ok(UntypedFn::create(creator::<T, TS>, stage_1_data)).into()
         }
 
         UntypedFnFactory::no_alloc(0, factory::<T, TS>)
@@ -186,7 +193,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
 /// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
 /// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called.
-/// 
+///
 /// In contrast to std::sync::Arc<T> / std::sync::Weak<T>, WeakServiceProviders prevent
 /// their parent from being vanished, if minfac::ERROR_HANDLER doesn't panic
 pub struct WeakServiceProvider<TS: Strategy + 'static = AnyStrategy>(ServiceProvider<TS>);

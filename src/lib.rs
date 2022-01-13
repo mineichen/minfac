@@ -2,7 +2,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-use abi_stable::std_types::{RArc, RVec, RStr, RString, RResult::{RErr, ROk}};
+use abi_stable::std_types::{
+    RArc,
+    RResult::{RErr, ROk},
+    RStr, RString, RVec,
+};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -37,7 +41,8 @@ pub use strategy::AnyStrategy;
 use crate::resolvable::SealedResolvable;
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
-type InternalBuildResult<TS> = abi_stable::std_types::RResult<UntypedFn<TS>, InternalBuildError<TS>>;
+type InternalBuildResult<TS> =
+    abi_stable::std_types::RResult<UntypedFn<TS>, InternalBuildError<TS>>;
 
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
@@ -239,11 +244,16 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             outer_ctx: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |_: &ServiceProvider<TS>, _outer_ctx| {
-                    unsafe { &*(_outer_ctx.get_pointer() as *mut T) }.clone()
-                };
-            ROk((func, outer_ctx).into())
+            extern "C" fn func<
+                T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
+                TS: Strategy + 'static,
+            >(
+                _: &ServiceProvider<TS>,
+                _outer_ctx: &AutoFreePointer,
+            ) -> T {
+                unsafe { &*(_outer_ctx.get_pointer() as *mut T) }.clone()
+            }
+            ROk(UntypedFn::create(func::<T, TS>, outer_ctx))
         }
 
         let factory = UntypedFnFactory::boxed(instance, factory::<T, TS>);
@@ -258,13 +268,15 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |_: &ServiceProvider<TS>, stage_2_data| {
-                    let ptr = stage_2_data.get_pointer();
-                    let creator: fn() -> T = unsafe { std::mem::transmute(ptr) };
-                    creator()
-                };
-            ROk((func, stage_1_data).into())
+            extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+                _: &ServiceProvider<TS>,
+                stage_2_data: &AutoFreePointer,
+            ) -> T {
+                let ptr = stage_2_data.get_pointer();
+                let creator: fn() -> T = unsafe { std::mem::transmute(ptr) };
+                creator()
+            }
+            ROk(UntypedFn::create(func::<T, TS>, stage_1_data))
         }
 
         let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TS>);
@@ -293,17 +305,18 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         where
             Arc<T>: Identifyable<TS::Id>,
         {
+            extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
+                provider: &ServiceProvider<TS>,
+                outer_ctx: &AutoFreePointer,
+            ) -> Arc<T> {
+                let (service_state_idx, fnptr) =
+                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext) };
+                let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
+                provider.get_or_initialize_pos(*service_state_idx, creator)
+            }
             let service_state_idx = ctx.reserve_state_space();
-
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> Arc<T> =
-                |provider: &ServiceProvider<TS>, outer_ctx| {
-                    let (service_state_idx, fnptr) =
-                        unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext) };
-                    let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
-                    provider.get_or_initialize_pos(*service_state_idx, creator)
-                };
             let inner: InnerContext = (service_state_idx, outer_ctx.get_pointer());
-            ROk((func, AutoFreePointer::boxed(inner)).into())
+            ROk(UntypedFn::create(func, AutoFreePointer::boxed(inner)))
         }
 
         let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TS>);
@@ -372,7 +385,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 cyclic_reference_candidates: &mut cyclic_reference_candidates,
                 service_descriptor_pos: i,
             };
-            
+
             let producer = match x.factory.call(&mut ctx) {
                 abi_stable::std_types::RResult::ROk(x) => x,
                 abi_stable::std_types::RResult::RErr(e) => return Err(e.into()),
@@ -480,8 +493,13 @@ enum InternalBuildError<TS: Strategy + Debug> {
 impl<TS: Strategy + Debug> From<InternalBuildError<TS>> for BuildError<TS> {
     fn from(i: InternalBuildError<TS>) -> Self {
         match i {
-            InternalBuildError::CyclicDependency { description } => BuildError::CyclicDependency { description: description.into() },
-            InternalBuildError::MissingDependency { id, name } => BuildError::MissingDependency { id, name: name.into() }
+            InternalBuildError::CyclicDependency { description } => BuildError::CyclicDependency {
+                description: description.into(),
+            },
+            InternalBuildError::MissingDependency { id, name } => BuildError::MissingDependency {
+                id,
+                name: name.into(),
+            },
         }
     }
 }
@@ -489,12 +507,16 @@ impl<TS: Strategy + Debug> From<InternalBuildError<TS>> for BuildError<TS> {
 impl<TS: Strategy + Debug> From<BuildError<TS>> for InternalBuildError<TS> {
     fn from(i: BuildError<TS>) -> Self {
         match i {
-            BuildError::CyclicDependency { description } => InternalBuildError::CyclicDependency { description: description.into() },
-            BuildError::MissingDependency { id, name } => InternalBuildError::MissingDependency { id, name: name.into() }
+            BuildError::CyclicDependency { description } => InternalBuildError::CyclicDependency {
+                description: description.into(),
+            },
+            BuildError::MissingDependency { id, name } => InternalBuildError::MissingDependency {
+                id,
+                name: name.into(),
+            },
         }
     }
 }
-
 
 impl<TS: Strategy + 'static> BuildError<TS> {
     fn new_missing_dependency<T: Identifyable<TS::Id>>() -> Self {
@@ -534,15 +556,25 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T = |provider, _outer_ctx| {
+            extern "C" fn func<
+                T: Identifyable<TS::Id>,
+                TDep: Resolvable<TS> + 'static,
+                TS: Strategy + 'static,
+            >(
+                provider: &ServiceProvider<TS>,
+                _outer_ctx: &AutoFreePointer,
+            ) -> T {
                 let (key, c): &InnerContext<TDep, TS> =
                     unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
                 let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
                 let arg = TDep::resolve_prechecked(provider, key);
                 creator(arg)
-            };
+            }
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer());
-            ROk((func, AutoFreePointer::boxed(inner)).into())
+            ROk(UntypedFn::create(
+                func::<T, TDep, TS>,
+                AutoFreePointer::boxed(inner),
+            ))
         }
         let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TDep, TS>);
         self.0
@@ -580,18 +612,27 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            let func: fn(&ServiceProvider<TS>, &AutoFreePointer) -> Arc<T> =
-                |provider, _outer_ctx| {
-                    let (key, c, service_state_idx): &InnerContext<TDep, TS> =
-                        unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
-                    provider.get_or_initialize_pos(*service_state_idx, || {
-                        let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
-                            unsafe { std::mem::transmute(*c) };
-                        creator(TDep::resolve_prechecked(provider, key))
-                    })
-                };
+            extern "C" fn func<
+                T: Send + Sync + 'static,
+                TDep: Resolvable<TS> + 'static,
+                TS: Strategy + 'static,
+            >(
+                provider: &ServiceProvider<TS>,
+                _outer_ctx: &AutoFreePointer,
+            ) -> Arc<T> {
+                let (key, c, service_state_idx): &InnerContext<TDep, TS> =
+                    unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                provider.get_or_initialize_pos(*service_state_idx, || {
+                    let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
+                        unsafe { std::mem::transmute(*c) };
+                    creator(TDep::resolve_prechecked(provider, key))
+                })
+            }
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer(), service_state_idx);
-            ROk((func, AutoFreePointer::boxed(inner)).into())
+            ROk(UntypedFn::create(
+                func::<T, TDep, TS>,
+                AutoFreePointer::boxed(inner),
+            ))
         }
         let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TDep, TS>);
         self.0

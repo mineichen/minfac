@@ -7,25 +7,52 @@ use alloc::boxed::Box;
 #[repr(C)]
 pub struct UntypedFn<TS: Strategy + 'static> {
     result_type_id: TS::Id,
-    pointer: usize,
+    factory_pointer: usize,
     context: AutoFreePointer,
     wrapper_creator:
         unsafe extern "C" fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
 }
 
-
 unsafe impl<TS: Strategy + 'static> Send for UntypedFn<TS> {}
 unsafe impl<TS: Strategy + 'static> Sync for UntypedFn<TS> {}
 
 impl<TS: Strategy + 'static> UntypedFn<TS> {
+    pub fn create<T: Identifyable<TS::Id>>(
+        creator: extern "C" fn(&ServiceProvider<TS>, &AutoFreePointer) -> T,
+        context: AutoFreePointer,
+    ) -> Self {
+        type InnerContext<TS> = (*const UntypedFn<TS>, *const ServiceProvider<TS>);
+        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+            inner: *const UntypedFn<TS>,
+            provider: *const ServiceProvider<TS>,
+        ) -> UntypedFn<TS> {
+            extern "C" fn new_factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+                _ignored_provider: &ServiceProvider<TS>,
+                context: &AutoFreePointer,
+            ) -> T {
+                unsafe {
+                    let (inner, provider) = &*(context.get_pointer() as *mut InnerContext<TS>);
+                    (&**inner).execute::<T>(&**provider)
+                }
+            }
+            let inner: InnerContext<TS> = (inner, provider);
+            UntypedFn::<TS>::create::<T>(new_factory, AutoFreePointer::boxed(inner))
+        }
+        UntypedFn {
+            result_type_id: T::get_id(),
+            context,
+            factory_pointer: creator as usize,
+            wrapper_creator: wrapper_creator::<T, TS>,
+        }
+    }
     pub fn get_result_type_id(&self) -> &TS::Id {
         &self.result_type_id
     }
 
     // Unsafe constraint: Must be called with the same T as it was created
     pub unsafe fn execute<T>(&self, provider: &ServiceProvider<TS>) -> T {
-        let lambda: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-            std::mem::transmute(self.pointer);
+        let lambda: extern "C" fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
+            std::mem::transmute(self.factory_pointer);
         (lambda)(provider, &self.context)
     }
 
@@ -34,42 +61,6 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
     /// returned UntypedFn
     pub unsafe fn bind(&self, provider: *const ServiceProvider<TS>) -> Self {
         (self.wrapper_creator)(self, provider)
-    }
-}
-
-impl<TS: Strategy + 'static, T>
-    From<(
-        fn(&ServiceProvider<TS>, &AutoFreePointer) -> T,
-        AutoFreePointer,
-    )> for UntypedFn<TS>
-where
-    T: Identifyable<TS::Id>,
-{
-    fn from(
-        (factory, stage1_context): (
-            fn(&ServiceProvider<TS>, &AutoFreePointer) -> T,
-            AutoFreePointer,
-        ),
-    ) -> Self {
-        type InnerContext<TS> = (*const UntypedFn<TS>, *const ServiceProvider<TS>);
-        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
-            inner: *const UntypedFn<TS>,
-            provider: *const ServiceProvider<TS>,
-        ) -> UntypedFn<TS> {
-            let factory: fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-                |_ignored_provider, context| unsafe {
-                    let (inner, provider) = &*(context.get_pointer() as *mut InnerContext<TS>);
-                    (&**inner).execute::<T>(&**provider)
-                };
-            let inner: InnerContext<TS> = (inner, provider);
-            (factory, AutoFreePointer::boxed(inner)).into()
-        }
-        UntypedFn {
-            result_type_id: T::get_id(),
-            context: stage1_context,
-            pointer: factory as usize,
-            wrapper_creator: wrapper_creator::<T, TS>,
-        }
     }
 }
 
