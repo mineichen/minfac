@@ -13,7 +13,6 @@ use alloc::{
     rc::Rc,
     string::{String, ToString},
     sync::Arc,
-    vec,
     vec::Vec,
 };
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
@@ -132,7 +131,7 @@ impl<TS: Strategy + 'static> ServiceProducer<TS> {
     }
 }
 
-type UntypedFnFactoryCreator<TS> = extern fn(
+type UntypedFnFactoryCreator<TS> = extern "C" fn(
     outer_context: AutoFreePointer,
     inner_context: &mut UntypedFnFactoryContext<TS>,
 ) -> InternalBuildResult<TS>;
@@ -237,14 +236,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         &mut self,
         instance: T,
     ) {
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn func<
+            extern "C" fn func<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -264,11 +263,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        extern fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+            extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
                 _: &ServiceProvider<TS>,
                 stage_2_data: &AutoFreePointer,
             ) -> T {
@@ -298,14 +297,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         Arc<T>: Identifyable<TS::Id>,
     {
         type InnerContext = (usize, usize);
-        extern fn factory<T: Send + Sync, TS: Strategy + 'static>(
+        extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS>
         where
             Arc<T>: Identifyable<TS::Id>,
         {
-            extern fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
+            extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
                 provider: &ServiceProvider<TS>,
                 outer_ctx: &AutoFreePointer,
             ) -> Arc<T> {
@@ -330,7 +329,9 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     /// If no errors occured, Ok(ServiceProvider) is returned.
     pub fn build(self) -> Result<ServiceProvider<TS>, BuildError<TS>> {
         let validation = self.validate_producers(Vec::new())?;
-        let shared_services = vec![OnceCell::new(); validation.service_states_count];
+        let shared_services = (0..validation.service_states_count)
+            .map(|_| OnceCell::default())
+            .collect();
         let immutable_state = RArc::new(service_provider::ServiceProviderImmutableState::new(
             validation.types,
             validation.producers,
@@ -539,7 +540,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         creator: fn(TDep::ItemPreChecked) -> T,
     ) -> AliasBuilder<T, TS> {
         type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, usize);
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -556,7 +557,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            extern fn func<
+            extern "C" fn func<
                 T: Identifyable<TS::Id>,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
@@ -592,7 +593,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
     {
         type InnerContext<TDep, TS> =
             (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
-        extern fn factory<
+        extern "C" fn factory<
             T: Send + Sync,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -612,7 +613,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 type_name::<TDep::ItemPreChecked>(),
                 Box::new(TDep::iter_positions(ctx.final_ordered_types)),
             );
-            extern fn func<
+            extern "C" fn func<
                 T: Send + Sync + 'static,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
@@ -644,17 +645,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
 }
 
 // At the time of writing, core::any::type_name_of_val was behind a nightly feature flag
-#[derive(Clone)]
-struct TypeNamed<T: Clone> {
+struct TypeNamed<T> {
     inner: T,
     type_name: &'static str,
-}
-
-impl<T: Clone> TypeNamed<T> {
-    fn map<TNew: Clone>(&self, mapper: impl Fn(&T) -> TNew) -> TypeNamed<TNew> {
-        TypeNamed {
-            inner: mapper(&self.inner),
-            type_name: self.type_name,
-        }
-    }
 }

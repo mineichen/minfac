@@ -108,7 +108,9 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
     /// # }
     /// ```
     pub fn build(&self, remaining: T) -> ServiceProvider<TS> {
-        let shared_services = alloc::vec![OnceCell::new(); self.service_states_count];
+        let shared_services = (0..self.service_states_count)
+            .map(|_| OnceCell::default())
+            .collect();
 
         ServiceProvider::new(
             self.immutable_state.clone(),
@@ -220,6 +222,17 @@ mod tests {
         });
 
         assert_eq!(Ok((2, 1)), result);
+    }
+
+    #[test]
+    fn register_unused_shared() {
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Arc::new(42i32));
+        collection.register_shared(|| Arc::new(1i64));
+        let provider = collection.build().unwrap();
+        {
+            assert_eq!(Some(Arc::new(42)), provider.get::<Arc<i32>>());
+        }
     }
 
     #[test]

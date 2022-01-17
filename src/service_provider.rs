@@ -1,16 +1,12 @@
 use crate::{
     binary_search,
     strategy::{Identifyable, Strategy},
-    untyped::{AutoFreePointer, UntypedFn},
+    untyped::{ArcAutoFreePointer, AutoFreePointer, UntypedFn},
     AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
 use abi_stable::std_types::{RArc, RVec};
-use alloc::{
-    boxed::Box,
-    sync::{Arc, Weak},
-    vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
     any::{type_name, Any},
     fmt,
@@ -65,8 +61,12 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                     .into_iter()
                     .filter_map(|c| {
                         c.get().and_then(|x| {
-                            if Arc::strong_count(&x.inner) > 1 {
-                                Some(x.map(|i| Arc::downgrade(i)))
+                            let weak = x.inner.downgrade();
+                            if weak.strong_count() > 0 {
+                                Some(TypeNamed {
+                                    inner: weak,
+                                    type_name: x.type_name,
+                                })
                             } else {
                                 None
                             }
@@ -75,10 +75,10 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                     .collect();
                 let errors: Vec<_> = checkers
                     .into_iter()
-                    .filter_map(|c| {
-                        (Weak::strong_count(&c.inner) > 0).then(|| DanglingCheckerResult {
-                            remaining_references: Weak::strong_count(&c.inner),
-                            typename: c.type_name,
+                    .filter_map(|x| {
+                        (x.inner.strong_count() > 0).then(|| DanglingCheckerResult {
+                            remaining_references: x.inner.strong_count(),
+                            typename: x.type_name,
                         })
                     })
                     .collect();
@@ -126,7 +126,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn new(
         immutable_state: RArc<ServiceProviderImmutableState<TS>>,
-        shared_services: Vec<OnceCell<TypeNamed<Arc<dyn Any + Send + Sync>>>>,
+        shared_services: Vec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
         base: Option<Box<dyn Any + Send + Sync>>,
     ) -> Self {
         Self {
@@ -143,14 +143,14 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
     ) -> UntypedFnFactory<TS> {
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn creator<
+            extern "C" fn creator<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -179,15 +179,11 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
             .get(index)
             .unwrap()
             .get_or_init(|| TypeNamed {
-                inner: initializer(),
-                type_name: type_name::<T>(),
+                inner: ArcAutoFreePointer::new(initializer()),
+                type_name: type_name::<Arc<T>>(),
             });
 
-        pointer
-            .clone()
-            .inner
-            .downcast::<T>()
-            .expect("This is likely a bug in minfac. Cell should never contain uncastable value")
+        unsafe { pointer.inner.clone_inner::<T>() }
     }
 }
 
@@ -215,7 +211,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern fn factory<TS: Strategy + 'static>(
+                extern "C" fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> InternalBuildResult<TS> {
@@ -292,7 +288,7 @@ impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
 pub(crate) struct ServiceProviderMutableState {
     // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
     base: Option<Box<dyn Any + Send + Sync>>,
-    shared_services: Vec<OnceCell<TypeNamed<Arc<dyn Any + Send + Sync>>>>,
+    shared_services: Vec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
 }
 
 /// Type used to retrieve all instances `T` of a `ServiceProvider`.
