@@ -2,14 +2,12 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-use abi_stable::std_types::{
+use abi_stable::{std_types::{
     RArc,
     RResult::{RErr, ROk},
-    RStr, RString, RVec,
-};
+    RStr, RString, RVec, RHashMap, RBox,
+}, DynTrait, erased_types::interfaces::IteratorInterface};
 use alloc::{
-    boxed::Box,
-    collections::BTreeMap,
     rc::Rc,
     string::{String, ToString},
     sync::Arc,
@@ -131,7 +129,7 @@ impl<TS: Strategy + 'static> ServiceProducer<TS> {
     }
 }
 
-type UntypedFnFactoryCreator<TS> = extern fn(
+type UntypedFnFactoryCreator<TS> = extern "C" fn(
     outer_context: AutoFreePointer,
     inner_context: &mut UntypedFnFactoryContext<TS>,
 ) -> InternalBuildResult<TS>;
@@ -162,8 +160,8 @@ impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
 struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
-    final_ordered_types: &'a Vec<TS::Id>,
-    cyclic_reference_candidates: &'a mut BTreeMap<usize, CycleCheckerValue>,
+    final_ordered_types: &'a RVec<TS::Id>,
+    cyclic_reference_candidates: &'a mut RHashMap<usize, CycleCheckerValue>,
 }
 
 impl<'a, TS: Strategy + 'static> UntypedFnFactoryContext<'a, TS> {
@@ -175,7 +173,7 @@ impl<'a, TS: Strategy + 'static> UntypedFnFactoryContext<'a, TS> {
     fn register_cyclic_reference_candidate(
         &mut self,
         type_name: &'static str,
-        dependencies: Box<dyn Iterator<Item = usize>>,
+        dependencies: DynTrait<'static, RBox<()>, IteratorInterface<usize>>,
     ) {
         self.cyclic_reference_candidates.insert(
             self.service_descriptor_pos,
@@ -236,14 +234,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         &mut self,
         instance: T,
     ) {
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn func<
+            extern "C" fn func<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -263,11 +261,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        extern fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+            extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
                 _: &ServiceProvider<TS>,
                 stage_2_data: &AutoFreePointer,
             ) -> T {
@@ -297,14 +295,14 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         Arc<T>: Identifyable<TS::Id>,
     {
         type InnerContext = (usize, usize);
-        extern fn factory<T: Send + Sync, TS: Strategy + 'static>(
+        extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS>
         where
             Arc<T>: Identifyable<TS::Id>,
         {
-            extern fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
+            extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
                 provider: &ServiceProvider<TS>,
                 outer_ctx: &AutoFreePointer,
             ) -> Arc<T> {
@@ -375,7 +373,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
         let mut final_ordered_types = factories.iter().map(|f| f.identifier).collect();
 
-        let mut cyclic_reference_candidates = BTreeMap::new();
+        let mut cyclic_reference_candidates = RHashMap::new();
         let mut producers = RVec::with_capacity(factories.len());
         let mut types = RVec::with_capacity(factories.len());
 
@@ -436,17 +434,27 @@ pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
 struct CycleCheckerValue {
     is_visited: bool,
     type_description: &'static str,
-    iter: Box<dyn Iterator<Item = usize>>, // Use RVec
+    iter: DynTrait<'static, RBox<()>, IteratorInterface<usize>>, // Use RVec
 }
-struct CycleChecker<'a>(&'a mut BTreeMap<usize, CycleCheckerValue>);
+
+
+
+struct CycleChecker<'a>(&'a mut RHashMap<usize, CycleCheckerValue>);
 
 impl<'a> CycleChecker<'a> {
     fn ok(self) -> Result<(), Vec<usize>> {
         let mut stack = Vec::new();
-        while let Some((pos, _)) = self.0.iter().next() {
-            stack.push(*pos);
+        let map = self.0;
+        
+        loop {
+            let pos = match map.keys().next() {
+                Some(pos) => *pos,
+                _ => break
+            };
+
+            stack.push(pos);
             while let Some(current) = stack.last() {
-                if let Some(value) = self.0.get_mut(current) {
+                if let Some(value) = map.get_mut(current) {
                     if value.is_visited {
                         return Err(stack);
                     }
@@ -457,13 +465,13 @@ impl<'a> CycleChecker<'a> {
                             continue;
                         }
                         None => {
-                            self.0.remove(current);
+                            map.remove(current);
                         }
                     };
                 }
                 stack.pop();
                 if let Some(parent) = stack.last() {
-                    let state = self.0.get_mut(parent).unwrap();
+                    let state = map.get_mut(parent).unwrap();
                     state.is_visited = false;
                 }
             }
@@ -540,7 +548,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         creator: fn(TDep::ItemPreChecked) -> T,
     ) -> AliasBuilder<T, TS> {
         type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, usize);
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -552,12 +560,12 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 Ok(x) => x,
                 Err(x) => return RErr(x.into()),
             };
-
+            let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW)
             );
-            extern fn func<
+            extern "C" fn func<
                 T: Identifyable<TS::Id>,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
@@ -593,7 +601,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
     {
         type InnerContext<TDep, TS> =
             (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
-        extern fn factory<
+        extern "C" fn factory<
             T: Send + Sync,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
@@ -609,11 +617,12 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 Ok(x) => x,
                 Err(x) => return RErr(x.into()),
             };
+            let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                Box::new(TDep::iter_positions(ctx.final_ordered_types)),
+                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW)
             );
-            extern fn func<
+            extern "C" fn func<
                 T: Send + Sync + 'static,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,

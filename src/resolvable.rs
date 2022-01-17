@@ -24,7 +24,7 @@ pub trait SealedResolvable<TS: Strategy + 'static> {
     type ItemPreChecked;
 
     type PrecheckResult;
-    type TypeIdsIter: Iterator<Item = usize>;
+    type TypeIdsIter: Iterator<Item = usize> + 'static + Send + Sync;
 
     /// Resolves a type with the specified provider. There might be multiple calls to this method with
     /// parent ServiceProviders. It will therefore not necessarily be an alias for provider.get() in the future.
