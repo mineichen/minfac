@@ -10,7 +10,7 @@ pub struct UntypedFn<TS: Strategy + 'static> {
     factory_pointer: usize,
     context: AutoFreePointer,
     wrapper_creator:
-        unsafe extern "C" fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
+        unsafe extern fn(*const UntypedFn<TS>, *const ServiceProvider<TS>) -> UntypedFn<TS>,
 }
 
 unsafe impl<TS: Strategy + 'static> Send for UntypedFn<TS> {}
@@ -18,15 +18,15 @@ unsafe impl<TS: Strategy + 'static> Sync for UntypedFn<TS> {}
 
 impl<TS: Strategy + 'static> UntypedFn<TS> {
     pub fn create<T: Identifyable<TS::Id>>(
-        creator: extern "C" fn(&ServiceProvider<TS>, &AutoFreePointer) -> T,
+        creator: extern fn(&ServiceProvider<TS>, &AutoFreePointer) -> T,
         context: AutoFreePointer,
     ) -> Self {
         type InnerContext<TS> = (*const UntypedFn<TS>, *const ServiceProvider<TS>);
-        unsafe extern "C" fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+        unsafe extern fn wrapper_creator<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             inner: *const UntypedFn<TS>,
             provider: *const ServiceProvider<TS>,
         ) -> UntypedFn<TS> {
-            extern "C" fn new_factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
+            extern fn new_factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
                 _ignored_provider: &ServiceProvider<TS>,
                 context: &AutoFreePointer,
             ) -> T {
@@ -51,7 +51,7 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
 
     // Unsafe constraint: Must be called with the same T as it was created
     pub unsafe fn execute<T>(&self, provider: &ServiceProvider<TS>) -> T {
-        let lambda: extern "C" fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
+        let lambda: extern fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
             std::mem::transmute(self.factory_pointer);
         (lambda)(provider, &self.context)
     }
@@ -67,17 +67,17 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
 #[repr(C)]
 #[cfg_attr(feature = "stable_abi", derive(abi_stable::StableAbi))]
 pub struct AutoFreePointer {
-    dropper: extern "C" fn(outer_context: usize),
+    dropper: extern fn(outer_context: usize),
     context: usize,
 }
 
 impl AutoFreePointer {
     pub fn no_alloc(context: usize) -> Self {
-        extern "C" fn dropper(_: usize) {}
+        extern fn dropper(_: usize) {}
         Self { dropper, context }
     }
     pub fn boxed<T>(input: T) -> Self {
-        extern "C" fn dropper<T>(u: usize) {
+        extern fn dropper<T>(u: usize) {
             if u != 0 {
                 drop(unsafe { Box::from_raw(u as *mut T) })
             }
@@ -100,21 +100,21 @@ impl Drop for AutoFreePointer {
 
 pub struct ArcAutoFreePointer {
     inner: AutoFreePointer,
-    downgrade_ptr: extern "C" fn(usize) -> WeakInfo,
+    downgrade_ptr: extern fn(usize) -> WeakInfo,
 }
 
 impl ArcAutoFreePointer {
     pub fn new<T>(i: Arc<T>) -> Self {
-        extern "C" fn dropper<T>(i: usize) {
+        extern fn dropper<T>(i: usize) {
             drop(unsafe { Arc::from_raw(i as *const T) });
         }
 
-        extern "C" fn downgrade<T>(i: usize) -> WeakInfo {
-            extern "C" fn drop_weak<T>(i: usize) {
+        extern fn downgrade<T>(i: usize) -> WeakInfo {
+            extern fn drop_weak<T>(i: usize) {
                 drop(unsafe { alloc::sync::Weak::from_raw(i as *const T) })
             }
 
-            extern "C" fn strong_count_on_weak<T>(i: usize) -> usize {
+            extern fn strong_count_on_weak<T>(i: usize) -> usize {
                 let weak = unsafe { std::sync::Weak::from_raw(i as *const T) };
                 let r = weak.strong_count();
                 let _ = weak.into_raw();
@@ -153,7 +153,7 @@ impl ArcAutoFreePointer {
 
 #[repr(C)]
 pub struct WeakInfo {
-    weak_ptr: extern "C" fn(usize) -> usize,
+    weak_ptr: extern fn(usize) -> usize,
     inner: AutoFreePointer,
 }
 

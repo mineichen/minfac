@@ -51,11 +51,11 @@ Creating a microframework on top of minfac is straight forward. The following se
 
 Projects prefixed with `raf` define and implement cross-cutting concerns and can easily be reused in other projects. The Todo project compiles into a dynamic library and has exactly one public symbol: The register-function. Within this function, a plugin registers various services, which are discoverable and can be used by other plugins or the runtime. 
 The following example illustrates the scenario of a plugin registering an `i32` as a service based on a `u8`, which must be provided by another plugin. If no one registers a `u8`, the application won't be able to start. Other plugins can require the `i32` provided by this plugin in the same way as this plugin requires a registered `u8`. 
-`raf-*` projects have a similar function, but don't declare it as `extern "C"`, because they're statically linked with the executable project.
+`raf-*` projects have a similar function, but don't declare it as `extern`, because they're statically linked with the executable project.
 
 ```rust
 #[no_mangle]
-pub extern "C" fn register(collection: &mut ServiceCollection) {
+pub extern fn register(collection: &mut ServiceCollection) {
     collection
         .with::<u8>()
         .register(|byte| byte as i32 * 2);
