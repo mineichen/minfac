@@ -1,11 +1,12 @@
 use crate::{
+    untyped::AutoFreePointer,
     service_provider::ServiceProviderImmutableState,
     strategy::{Identifyable, Strategy},
     AnyStrategy, GenericServiceCollection, ProducerValidationResult, ServiceProducer,
     ServiceProvider, WeakServiceProvider,
 };
 use abi_stable::std_types::{RArc, RVec};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use core::{clone::Clone, marker::PhantomData};
 use once_cell::sync::OnceCell;
 
@@ -115,7 +116,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
         ServiceProvider::new(
             self.immutable_state.clone(),
             shared_services,
-            Some(Box::new(remaining)),
+            Some(AutoFreePointer::boxed(remaining)),
         )
     }
 }

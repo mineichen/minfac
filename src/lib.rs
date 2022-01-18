@@ -112,6 +112,10 @@ impl<'a, T: Identifyable<TS::Id>, TS: Strategy + 'static> AliasBuilder<'a, T, TS
     }
 }
 
+pub extern fn test() -> once_cell::sync::OnceCell<usize> {
+    once_cell::sync::OnceCell::new()
+}
+
 struct ServiceProducer<TS: Strategy + 'static> {
     identifier: TS::Id,
     factory: UntypedFnFactory<TS>,

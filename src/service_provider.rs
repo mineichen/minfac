@@ -50,7 +50,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
 
         let mut swapped_service_states = RArc::new(ServiceProviderMutableState {
             base: None,
-            shared_services: Vec::new(),
+            shared_services: RVec::new(),
         });
         swap(&mut swapped_service_states, &mut self.service_states);
 
@@ -126,8 +126,8 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn new(
         immutable_state: RArc<ServiceProviderImmutableState<TS>>,
-        shared_services: Vec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
-        base: Option<Box<dyn Any + Send + Sync>>,
+        shared_services: RVec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
+        base: Option<AutoFreePointer>,
     ) -> Self {
         Self {
             immutable_state,
@@ -143,14 +143,14 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
     ) -> UntypedFnFactory<TS> {
-        extern "C" fn factory<
+        extern fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern "C" fn creator<
+            extern fn creator<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -158,7 +158,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
                 _stage_2_data: &AutoFreePointer,
             ) -> T {
                 match &provider.service_states.base {
-                    Some(x) => x.downcast_ref::<T>().unwrap().clone(),
+                    Some(x) => unsafe { &*(x.get_pointer() as *const T ) }.clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
                 }
             }
@@ -211,7 +211,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern "C" fn factory<TS: Strategy + 'static>(
+                extern fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> InternalBuildResult<TS> {
@@ -287,8 +287,8 @@ impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
 
 pub(crate) struct ServiceProviderMutableState {
     // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
-    base: Option<Box<dyn Any + Send + Sync>>,
-    shared_services: Vec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
+    base: Option<AutoFreePointer>,
+    shared_services: RVec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
 }
 
 /// Type used to retrieve all instances `T` of a `ServiceProvider`.
