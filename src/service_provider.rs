@@ -1,8 +1,7 @@
 use crate::{
     binary_search,
     lifetime::{
-        DanglingCheckerResult, DanglingCheckerResults, LifetimeError,
-        OutlivedLifetimeErrorVariants,
+        DanglingCheckerResult, DanglingCheckerResults, LifetimeError, OutlivedLifetimeErrorVariants,
     },
     strategy::{Identifyable, Strategy},
     untyped::{ArcAutoFreePointer, AutoFreePointer, UntypedFn},

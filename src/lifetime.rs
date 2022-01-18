@@ -145,6 +145,5 @@ mod tests {
 
     #[deny(improper_ctypes_definitions)]
     #[allow(dead_code)]
-    pub extern fn assert_stable_abi(_i: LifetimeError) {
-    }
+    pub extern "C" fn assert_stable_abi(_i: LifetimeError) {}
 }
