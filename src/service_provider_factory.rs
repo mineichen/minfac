@@ -1,7 +1,7 @@
 use crate::{
-    untyped::AutoFreePointer,
     service_provider::ServiceProviderImmutableState,
     strategy::{Identifyable, Strategy},
+    untyped::AutoFreePointer,
     AnyStrategy, GenericServiceCollection, ProducerValidationResult, ServiceProducer,
     ServiceProvider, WeakServiceProvider,
 };

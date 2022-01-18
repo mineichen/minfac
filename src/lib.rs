@@ -2,11 +2,15 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-use abi_stable::{std_types::{
-    RArc,
-    RResult::{RErr, ROk},
-    RStr, RString, RVec, RHashMap, RBox,
-}, DynTrait, erased_types::interfaces::IteratorInterface};
+use abi_stable::{
+    erased_types::interfaces::IteratorInterface,
+    std_types::{
+        RArc, RBox, RHashMap,
+        RResult::{RErr, ROk},
+        RStr, RString, RVec,
+    },
+    DynTrait,
+};
 use alloc::{
     rc::Rc,
     string::{String, ToString},
@@ -14,12 +18,14 @@ use alloc::{
     vec::Vec,
 };
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
+use lifetime::default_error_handler;
 use once_cell::sync::OnceCell;
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use strategy::{Identifyable, Strategy};
 use untyped::{AutoFreePointer, UntypedFn};
 
 mod binary_search;
+mod lifetime;
 mod resolvable;
 mod service_provider;
 mod service_provider_factory;
@@ -28,6 +34,7 @@ pub mod stable_abi;
 mod strategy;
 mod untyped;
 
+pub use lifetime::LifetimeError;
 pub use resolvable::Resolvable;
 pub use service_provider::ServiceIterator;
 pub use service_provider::ServiceProvider;
@@ -58,12 +65,7 @@ type InternalBuildResult<TS> =
 ///
 /// This variable only exists, if debug_assertions are enabled
 #[cfg(debug_assertions)]
-pub static mut ERROR_HANDLER: fn(msg: &dyn Debug) = |_msg| {
-    #[cfg(feature = "std")]
-    if !std::thread::panicking() {
-        panic!("{:?}", _msg)
-    }
-};
+pub static mut MINFAC_ERROR_HANDLER: extern "C" fn(&LifetimeError) = default_error_handler;
 
 /// Represents a query for the last registered instance of `T`
 pub struct Registered<T>(PhantomData<T>);
@@ -110,10 +112,6 @@ impl<'a, T: Identifyable<TS::Id>, TS: Strategy + 'static> AliasBuilder<'a, T, TS
             .register(creator);
         AliasBuilder::<_, TS>(self.0.clone(), PhantomData)
     }
-}
-
-pub extern fn test() -> once_cell::sync::OnceCell<usize> {
-    once_cell::sync::OnceCell::new()
 }
 
 struct ServiceProducer<TS: Strategy + 'static> {
@@ -441,19 +439,17 @@ struct CycleCheckerValue {
     iter: DynTrait<'static, RBox<()>, IteratorInterface<usize>>, // Use RVec
 }
 
-
-
 struct CycleChecker<'a>(&'a mut RHashMap<usize, CycleCheckerValue>);
 
 impl<'a> CycleChecker<'a> {
     fn ok(self) -> Result<(), Vec<usize>> {
         let mut stack = Vec::new();
         let map = self.0;
-        
+
         loop {
             let pos = match map.keys().next() {
                 Some(pos) => *pos,
-                _ => break
+                _ => break,
             };
 
             stack.push(pos);
@@ -567,7 +563,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW)
+                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW),
             );
             extern "C" fn func<
                 T: Identifyable<TS::Id>,
@@ -624,7 +620,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW)
+                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW),
             );
             extern "C" fn func<
                 T: Send + Sync + 'static,

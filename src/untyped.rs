@@ -98,7 +98,6 @@ impl Drop for AutoFreePointer {
     }
 }
 
-
 pub struct ArcAutoFreePointer {
     inner: AutoFreePointer,
     downgrade_ptr: extern "C" fn(usize) -> WeakInfo,

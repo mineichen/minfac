@@ -1,12 +1,16 @@
 use crate::{
     binary_search,
+    lifetime::{
+        DanglingCheckerResult, DanglingCheckerResults, LifetimeError,
+        OutlivedLifetimeErrorVariants,
+    },
     strategy::{Identifyable, Strategy},
     untyped::{ArcAutoFreePointer, AutoFreePointer, UntypedFn},
     AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
 use abi_stable::std_types::{RArc, RVec};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::{
     any::{type_name, Any},
     fmt,
@@ -73,29 +77,29 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                         })
                     })
                     .collect();
-                let errors: Vec<_> = checkers
+                let errors = checkers
                     .into_iter()
                     .filter_map(|x| {
-                        (x.inner.strong_count() > 0).then(|| DanglingCheckerResult {
-                            remaining_references: x.inner.strong_count(),
-                            typename: x.type_name,
+                        (x.inner.strong_count() > 0).then(|| {
+                            DanglingCheckerResult::new(x.inner.strong_count(), x.type_name)
                         })
                     })
-                    .collect();
+                    .collect::<DanglingCheckerResults>();
 
-                if !errors.is_empty() {
+                if errors.len > 0 {
                     unsafe {
-                        crate::ERROR_HANDLER(&alloc::format!(
-                            "Some instances outlived their ServiceProvider: {:?}",
-                            errors
+                        (crate::MINFAC_ERROR_HANDLER)(&LifetimeError::new(
+                            OutlivedLifetimeErrorVariants::SharedServices(errors),
                         ))
                     };
                 }
             }
             Err(x) => unsafe {
-                crate::ERROR_HANDLER(&alloc::format!(
-                    "Original ServiceProvider was dropped while still beeing used {} times",
-                    RArc::strong_count(&x) - 1
+                let remaining_references = RArc::strong_count(&x) - 1;
+                crate::MINFAC_ERROR_HANDLER(&LifetimeError::new(
+                    OutlivedLifetimeErrorVariants::WeakServiceProvider {
+                        remaining_references,
+                    },
                 ));
             },
         }
@@ -143,14 +147,14 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn build_service_producer_for_base<T: Identifyable<TS::Id> + Clone + Send + Sync>(
     ) -> UntypedFnFactory<TS> {
-        extern fn factory<
+        extern "C" fn factory<
             T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
             TS: Strategy + 'static,
         >(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
-            extern fn creator<
+            extern "C" fn creator<
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
@@ -158,7 +162,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
                 _stage_2_data: &AutoFreePointer,
             ) -> T {
                 match &provider.service_states.base {
-                    Some(x) => unsafe { &*(x.get_pointer() as *const T ) }.clone(),
+                    Some(x) => unsafe { &*(x.get_pointer() as *const T) }.clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
                 }
             }
@@ -211,7 +215,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
             .zip(static_self.0.immutable_state.types.iter())
             .map(move |(parent_producer, parent_type)| {
                 // parents are part of ServiceProviderImmutableState to live as long as the inherited UntypedFn
-                extern fn factory<TS: Strategy + 'static>(
+                extern "C" fn factory<TS: Strategy + 'static>(
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> InternalBuildResult<TS> {
@@ -355,20 +359,5 @@ impl<'a, TS: Strategy + 'static, T: Identifyable<TS::Id>> Iterator for ServiceIt
                 pos + 1
             })
             .unwrap_or(0)
-    }
-}
-
-struct DanglingCheckerResult {
-    pub remaining_references: usize,
-    pub typename: &'static str,
-}
-
-impl Debug for DanglingCheckerResult {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Type: {} (remaining {})",
-            self.typename, self.remaining_references
-        )
     }
 }

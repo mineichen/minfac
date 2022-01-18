@@ -326,6 +326,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for R
     }
 }
 impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> Resolvable<TS> for Registered<T> {}
+
 #[cfg(test)]
 mod tests {
     use core::any::TypeId;
