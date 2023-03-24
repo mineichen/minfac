@@ -27,3 +27,17 @@ assert_eq!(Some(2i16), provider.get::<i16>());
 - `ServiceProvider` implements Send+Sync and is threadsafe without using locks
 
 Visit the examples/documentation for more details
+## Required Tasks for stable release
+✅ Transient services - New instance per request  
+✅ Shared services - Shared instance per ServiceProvider  
+✅ Instance services - Shared instance per ServiceProviderFactory  
+
+✅ ServiceProviderFactory for creating ServiceProvider's with minimal overhead  
+✅ ServiceProviderFactory inherit services from ServiceProvider  
+⬜ ServiceProviderFactory inherit services from other ServiceProviderFactory  
+
+✅ Replaceable strategy for service identification (TypeIds might change between rust versions)  
+✅ Recursive dependencies check  
+✅ Missing dependencies check  
+⬜ Make all structs FFI-Safe  
+⬜ Remove global Error handler. Use transition from ServiceCollection to ServiceProvider to replace default Error-Hander
