@@ -48,6 +48,8 @@ pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 type InternalBuildResult<TS> =
     abi_stable::std_types::RResult<UntypedFn<TS>, InternalBuildError<TS>>;
 
+type AnyPtr = *const ();
+
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
 /// - ServiceIterator<T>, which owns a WeakServiceProvider internally, outlives its ServiceProvider
@@ -142,7 +144,7 @@ struct UntypedFnFactory<TS: Strategy + 'static> {
 }
 
 impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
-    fn no_alloc(context: usize, creator: UntypedFnFactoryCreator<TS>) -> Self {
+    fn no_alloc(context: AnyPtr, creator: UntypedFnFactoryCreator<TS>) -> Self {
         Self {
             creator,
             context: AutoFreePointer::no_alloc(context),
@@ -247,10 +249,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
-                _: &ServiceProvider<TS>,
-                _outer_ctx: &AutoFreePointer,
+                _: *const ServiceProvider<TS>,
+                outer_ctx: *const AutoFreePointer,
             ) -> T {
-                unsafe { &*(_outer_ctx.get_pointer() as *mut T) }.clone()
+                let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
+                unsafe { &*(outer_ctx.get_pointer() as *mut T) }.clone()
             }
             ROk(UntypedFn::create(func::<T, TS>, outer_ctx))
         }
@@ -268,9 +271,10 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             _ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS> {
             extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
-                _: &ServiceProvider<TS>,
-                stage_2_data: &AutoFreePointer,
+                _: *const ServiceProvider<TS>,
+                stage_2_data: *const AutoFreePointer,
             ) -> T {
+                let stage_2_data = unsafe { &*stage_2_data as &AutoFreePointer };
                 let ptr = stage_2_data.get_pointer();
                 let creator: fn() -> T = unsafe { std::mem::transmute(ptr) };
                 creator()
@@ -278,7 +282,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             ROk(UntypedFn::create(func::<T, TS>, stage_1_data))
         }
 
-        let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TS>);
+        let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TS>);
         self.producer_factories
             .push(ServiceProducer::<TS>::new::<T>(factory));
         AliasBuilder::new(self)
@@ -296,7 +300,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     where
         Arc<T>: Identifyable<TS::Id>,
     {
-        type InnerContext = (usize, usize);
+        type InnerContext = (usize, AnyPtr);
         extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
@@ -305,9 +309,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             Arc<T>: Identifyable<TS::Id>,
         {
             extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
-                provider: &ServiceProvider<TS>,
-                outer_ctx: &AutoFreePointer,
+                provider: *const ServiceProvider<TS>,
+                outer_ctx: *const AutoFreePointer,
             ) -> Arc<T> {
+                let provider = unsafe { &*provider as &ServiceProvider<TS> };
+                let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (service_state_idx, fnptr) =
                     unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext) };
                 let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
@@ -318,7 +324,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             ROk(UntypedFn::create(func, AutoFreePointer::boxed(inner)))
         }
 
-        let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TS>);
+        let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TS>);
         self.producer_factories
             .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));
 
@@ -547,7 +553,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,
     ) -> AliasBuilder<T, TS> {
-        type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, usize);
+        type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, AnyPtr);
         extern "C" fn factory<
             T: Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
@@ -563,18 +569,20 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW),
+                abi_stable::DynTrait::from_value(data),
             );
             extern "C" fn func<
                 T: Identifyable<TS::Id>,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
             >(
-                provider: &ServiceProvider<TS>,
-                _outer_ctx: &AutoFreePointer,
+                provider: *const ServiceProvider<TS>,
+                outer_ctx: *const AutoFreePointer,
             ) -> T {
+                let provider = unsafe { &*provider as &ServiceProvider<TS> };
+                let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c): &InnerContext<TDep, TS> =
-                    unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
                 let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
                 let arg = TDep::resolve_prechecked(provider, key);
                 creator(arg)
@@ -585,7 +593,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 AutoFreePointer::boxed(inner),
             ))
         }
-        let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TDep, TS>);
+        let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TDep, TS>);
         self.0
             .producer_factories
             .push(ServiceProducer::<TS>::new::<T>(factory));
@@ -599,8 +607,11 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
     where
         Arc<T>: Identifyable<TS::Id>,
     {
-        type InnerContext<TDep, TS> =
-            (<TDep as SealedResolvable<TS>>::PrecheckResult, usize, usize);
+        type InnerContext<TDep, TS> = (
+            <TDep as SealedResolvable<TS>>::PrecheckResult,
+            AnyPtr,
+            usize,
+        );
         extern "C" fn factory<
             T: Send + Sync,
             TDep: Resolvable<TS> + 'static,
@@ -620,18 +631,20 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_any_value(data, IteratorInterface::NEW),
+                abi_stable::DynTrait::from_value(data),
             );
             extern "C" fn func<
                 T: Send + Sync + 'static,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
             >(
-                provider: &ServiceProvider<TS>,
-                _outer_ctx: &AutoFreePointer,
+                provider: *const ServiceProvider<TS>,
+                outer_ctx: *const AutoFreePointer,
             ) -> Arc<T> {
+                let provider = unsafe { &*provider as &ServiceProvider<TS> };
+                let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c, service_state_idx): &InnerContext<TDep, TS> =
-                    unsafe { &*(_outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
                 provider.get_or_initialize_pos(*service_state_idx, || {
                     let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
                         unsafe { std::mem::transmute(*c) };
@@ -644,7 +657,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 AutoFreePointer::boxed(inner),
             ))
         }
-        let factory = UntypedFnFactory::no_alloc(creator as usize, factory::<T, TDep, TS>);
+        let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TDep, TS>);
         self.0
             .producer_factories
             .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));

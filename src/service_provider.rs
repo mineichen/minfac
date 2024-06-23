@@ -157,9 +157,10 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
                 T: Identifyable<TS::Id> + Clone + 'static + Send + Sync,
                 TS: Strategy + 'static,
             >(
-                provider: &ServiceProvider<TS>,
-                _stage_2_data: &AutoFreePointer,
+                provider: *const ServiceProvider<TS>,
+                _stage_2_data: *const AutoFreePointer,
             ) -> T {
+                let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 match &provider.service_states.base {
                     Some(x) => unsafe { &*(x.get_pointer() as *const T) }.clone(),
                     None => panic!("Expected ServiceProviderFactory to set a value for `base`"),
@@ -168,7 +169,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
             Ok(UntypedFn::create(creator::<T, TS>, stage_1_data)).into()
         }
 
-        UntypedFnFactory::no_alloc(0, factory::<T, TS>)
+        UntypedFnFactory::no_alloc(std::ptr::null(), factory::<T, TS>)
     }
 
     pub(crate) fn get_or_initialize_pos<T: Any + Send + Sync, TFn: Fn() -> Arc<T>>(
