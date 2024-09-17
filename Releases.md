@@ -1,5 +1,7 @@
 # 0.1.0
 - Make Service-Identification exchangeable, to allow stable identifiers ([TypeId hashes and ordering will vary between releases](https://doc.rust-lang.org/std/any/struct.TypeId.html))
+- Start removing trait objects to work toward ABI-Stability
+- Fix code which doesn't compile with rust 1.81
 - Breaking changes:
   - BuildError::MissingDependency { id } is the id of `T` instead of `Registered<T>`
   - ServiceIterator uses generic parameter `T` instead of `Registered<T>`

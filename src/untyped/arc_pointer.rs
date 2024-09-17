@@ -1,4 +1,4 @@
-use alloc::{alloc::alloc, sync::Arc};
+use alloc::sync::Arc;
 
 use super::{super::AnyPtr, AutoFreePointer};
 

@@ -41,7 +41,6 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
             let inner: InnerContext<TS> = (inner, provider);
             UntypedFn::<TS>::create::<T>(new_factory, AutoFreePointer::boxed(inner))
         }
-        println!("{:x}, {:?}", creator as usize, context.get_pointer());
         UntypedFn {
             result_type_id: T::get_id(),
             context,
