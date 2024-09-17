@@ -276,7 +276,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             ) -> T {
                 let stage_2_data = unsafe { &*stage_2_data as &AutoFreePointer };
                 let ptr = stage_2_data.get_pointer();
-                let creator: fn() -> T = unsafe { std::mem::transmute(ptr) };
+                let creator: fn() -> T = unsafe { core::mem::transmute(ptr) };
                 creator()
             }
             ROk(UntypedFn::create(func::<T, TS>, stage_1_data))

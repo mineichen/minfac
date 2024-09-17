@@ -177,7 +177,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn arcs_with_dependencies_are_not_shared_between_two_provider_produced_by_the_same_factory() {
         let mut collection = ServiceCollection::new();
         collection

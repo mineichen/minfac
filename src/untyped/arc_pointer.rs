@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{alloc::alloc, sync::Arc};
 
 use super::{super::AnyPtr, AutoFreePointer};
 
@@ -8,18 +8,18 @@ pub struct ArcAutoFreePointer {
 }
 
 impl ArcAutoFreePointer {
-    pub fn new<T>(i: Arc<T>) -> Self {
+    pub fn new<T: Send + Sync>(i: Arc<T>) -> Self {
         extern "C" fn dropper<T>(i: AnyPtr) {
             drop(unsafe { Arc::from_raw(i as *const T) });
         }
 
-        extern "C" fn downgrade<T>(i: AnyPtr) -> WeakInfo {
+        extern "C" fn downgrade<T: Send + Sync>(i: AnyPtr) -> WeakInfo {
             extern "C" fn drop_weak<T>(i: AnyPtr) {
                 drop(unsafe { alloc::sync::Weak::from_raw(i as *const T) })
             }
 
             extern "C" fn strong_count_on_weak<T>(i: AnyPtr) -> usize {
-                let weak = unsafe { std::sync::Weak::from_raw(i as *const T) };
+                let weak = unsafe { alloc::sync::Weak::from_raw(i as *const T) };
                 let r = weak.strong_count();
                 let _ = weak.into_raw();
                 r
@@ -28,7 +28,7 @@ impl ArcAutoFreePointer {
             let weak = Arc::downgrade(&arc);
             let _ = Arc::into_raw(arc);
             WeakInfo {
-                inner: AutoFreePointer::new(weak.into_raw() as AnyPtr, drop_weak::<T>),
+                inner: AutoFreePointer::new(weak.into_raw(), drop_weak::<T>),
                 weak_ptr: strong_count_on_weak::<T>,
             }
         }

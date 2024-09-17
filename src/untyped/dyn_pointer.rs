@@ -10,8 +10,14 @@ unsafe impl Send for AutoFreePointer {}
 unsafe impl Sync for AutoFreePointer {}
 
 impl AutoFreePointer {
-    pub fn new(context: AnyPtr, dropper: extern "C" fn(outer_context: AnyPtr)) -> Self {
-        Self { context, dropper }
+    pub fn new<T: Send + Sync>(
+        context: *const T,
+        dropper: extern "C" fn(outer_context: AnyPtr),
+    ) -> Self {
+        Self {
+            context: context as AnyPtr,
+            dropper,
+        }
     }
 
     pub fn no_alloc(context: AnyPtr) -> Self {
