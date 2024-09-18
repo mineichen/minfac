@@ -17,7 +17,7 @@ use core::{
     marker::PhantomData,
     mem::swap,
 };
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 
 /// ServiceProviders are created directly from ServiceCollections or ServiceProviderFactories and can be used
 /// to retrieve services by type. ServiceProviders are final and cannot be modified anßymore. When a ServiceProvider goes
@@ -129,7 +129,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn new(
         immutable_state: RArc<ServiceProviderImmutableState<TS>>,
-        shared_services: RVec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
+        shared_services: RVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
         base: Option<AutoFreePointer>,
     ) -> Self {
         Self {
@@ -292,7 +292,7 @@ impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
 pub(crate) struct ServiceProviderMutableState {
     // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
     base: Option<AutoFreePointer>,
-    shared_services: RVec<OnceCell<TypeNamed<ArcAutoFreePointer>>>,
+    shared_services: RVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
 }
 
 /// Type used to retrieve all instances `T` of a `ServiceProvider`.

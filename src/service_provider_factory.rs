@@ -8,7 +8,7 @@ use crate::{
 use abi_stable::std_types::{RArc, RVec};
 use alloc::vec::Vec;
 use core::{clone::Clone, marker::PhantomData};
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 
 /// Performs all checks to build a ServiceProvider on premise that an instance of type T will be available.
 /// Therefore, multiple ServiceProvider with a different base can be created very efficiently.
@@ -110,7 +110,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
     /// ```
     pub fn build(&self, remaining: T) -> ServiceProvider<TS> {
         let shared_services = (0..self.service_states_count)
-            .map(|_| OnceCell::default())
+            .map(|_| OnceLock::default())
             .collect();
 
         ServiceProvider::new(

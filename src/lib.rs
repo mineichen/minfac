@@ -19,8 +19,8 @@ use alloc::{
 };
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use lifetime::default_error_handler;
-use once_cell::sync::OnceCell;
 use service_provider_factory::ServiceProviderFactoryBuilder;
+use std::sync::OnceLock;
 use strategy::{Identifyable, Strategy};
 use untyped::{AutoFreePointer, UntypedFn};
 
@@ -336,7 +336,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn build(self) -> Result<ServiceProvider<TS>, BuildError<TS>> {
         let validation = self.validate_producers(Vec::new())?;
         let shared_services = (0..validation.service_states_count)
-            .map(|_| OnceCell::default())
+            .map(|_| OnceLock::default())
             .collect();
         let immutable_state = RArc::new(service_provider::ServiceProviderImmutableState::new(
             validation.types,
