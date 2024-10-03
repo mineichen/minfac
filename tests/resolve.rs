@@ -32,11 +32,9 @@ fn drop_service_provider_with_existing_shared_registered_on_panic_is_recoverable
 }
 
 #[test]
-#[cfg(debug_assertions)]
 #[should_panic(
     expected = "Some instances outlived their ServiceProvider: [alloc::sync::Arc<i32> (remaining 1)]"
 )]
-#[cfg_attr(miri, ignore = "Miri cannot unwind the panic by default")]
 fn drop_service_provider_with_existing_shared_registered_is_panicking() {
     let mut _outer = None;
     {

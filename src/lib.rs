@@ -6,7 +6,7 @@ use abi_stable::{
     erased_types::interfaces::IteratorInterface,
     std_types::{
         RArc, RBox, RHashMap,
-        RResult::{RErr, ROk},
+        RResult::{self, RErr, ROk},
         RStr, RString, RVec,
     },
     DynTrait,
@@ -45,8 +45,7 @@ pub use strategy::AnyStrategy;
 use crate::resolvable::SealedResolvable;
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
-type InternalBuildResult<TS> =
-    abi_stable::std_types::RResult<UntypedFn<TS>, InternalBuildError<TS>>;
+type InternalBuildResult<TS> = RResult<UntypedFn<TS>, InternalBuildError<TS>>;
 
 type AnyPtr = *const ();
 
@@ -67,7 +66,7 @@ type AnyPtr = *const ();
 ///
 /// This variable only exists, if debug_assertions are enabled
 #[cfg(debug_assertions)]
-pub static mut MINFAC_ERROR_HANDLER: extern "C" fn(&LifetimeError) = default_error_handler;
+pub static mut MINFAC_ERROR_HANDLER: extern "C-unwind" fn(&LifetimeError) = default_error_handler;
 
 /// Represents a query for the last registered instance of `T`
 pub struct Registered<T>(PhantomData<T>);
@@ -394,8 +393,8 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             };
 
             let producer = match x.factory.call(&mut ctx) {
-                abi_stable::std_types::RResult::ROk(x) => x,
-                abi_stable::std_types::RResult::RErr(e) => return Err(e.into()),
+                ROk(x) => x,
+                RErr(e) => return Err(e.into()),
             };
             debug_assert_eq!(&x.identifier, producer.get_result_type_id());
             producers.push(producer);
@@ -569,7 +568,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_value(data),
+                DynTrait::from_value(data),
             );
             extern "C" fn func<
                 T: Identifyable<TS::Id>,
@@ -631,7 +630,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                abi_stable::DynTrait::from_value(data),
+                DynTrait::from_value(data),
             );
             extern "C" fn func<
                 T: Send + Sync + 'static,

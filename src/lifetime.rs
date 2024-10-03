@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use std::fmt::Write;
 
-pub extern "C" fn default_error_handler(error: &LifetimeError) {
+pub extern "C-unwind" fn default_error_handler(error: &LifetimeError) {
     #[cfg(feature = "std")]
     if !std::thread::panicking() {
         panic!("{:?}", error)

@@ -91,6 +91,7 @@ mod tests {
     use crate::{GenericServiceCollection, Registered};
     use abi_stable::{
         erased_types::TD_Opaque,
+        sabi_trait,
         std_types::{RArc, RBox},
     };
     use std::ffi::CString;
@@ -104,7 +105,7 @@ mod tests {
         );
     }
 
-    #[abi_stable::sabi_trait]
+    #[sabi_trait]
     trait BarStableAbi {
         fn get_no(&self) -> i32;
     }
