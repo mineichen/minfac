@@ -1,6 +1,6 @@
 [package]
 name = "minfac"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
 description = "Lightweight Inversion Of Control"
 repository = "https://github.com/mineichen/minfac"
