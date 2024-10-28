@@ -1,3 +1,6 @@
+# 0.1.1
+- Error-Handler, which defaults to panicking, uses "C-unwind" instead of "C" to allow panicking
+
 # 0.1.0
 - Make Service-Identification exchangeable, to allow stable identifiers ([TypeId hashes and ordering will vary between releases](https://doc.rust-lang.org/std/any/struct.TypeId.html))
 - Start removing trait objects to work toward ABI-Stability
