@@ -190,6 +190,20 @@ fn no_dependency_needed_if_service_depends_on_services_which_are_not_present() {
 }
 
 #[test]
+fn register_with() {
+    let mut collection = ServiceCollection::new();
+    collection.register_with((|| 42u8) as fn() -> u8);
+    collection.register_with((|Registered(x): Registered<u8>| x as u16) as fn(_) -> _);
+    collection.register_with(
+        (|AllRegistered(iter): AllRegistered<u16>| iter.map(|x| x as u32).sum::<u32>())
+            as fn(_) -> _,
+    );
+    let provider = collection.build().unwrap();
+    assert_eq!(Some(42u16), provider.get::<u16>());
+    assert_eq!(Some(42u32), provider.get::<u32>());
+}
+
+#[test]
 fn resolve_shared_services() {
     let mut collection = ServiceCollection::new();
     collection.register_shared(|| Arc::new(0));

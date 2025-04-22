@@ -36,6 +36,8 @@ pub trait SealedResolvable<TS: Strategy + 'static> {
         key: &Self::PrecheckResult,
     ) -> Self::ItemPreChecked;
 
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self;
+
     fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>>;
 
     // Iterates all positions involved in resolving the type. This is required for checking
@@ -58,6 +60,9 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for () {
 
     fn precheck(_ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
         Ok(())
+    }
+
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
     }
 
     fn iter_positions(_: &[TS::Id]) -> Self::TypeIdsIter {
@@ -85,6 +90,13 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResol
         (
             T0::resolve_prechecked(provider, &key.0),
             T1::resolve_prechecked(provider, &key.1),
+        )
+    }
+
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+        (
+            T0::resolve_prechecked_self(provider, &key.0),
+            T1::resolve_prechecked_self(provider, &key.1),
         )
     }
 
@@ -123,6 +135,14 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolva
             T0::resolve_prechecked(provider, &key.0),
             T1::resolve_prechecked(provider, &key.1),
             T2::resolve_prechecked(provider, &key.2),
+        )
+    }
+
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+        (
+            T0::resolve_prechecked_self(provider, &key.0),
+            T1::resolve_prechecked_self(provider, &key.1),
+            T2::resolve_prechecked_self(provider, &key.2),
         )
     }
 
@@ -189,6 +209,15 @@ impl<
         )
     }
 
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+        (
+            T0::resolve_prechecked_self(provider, &key.0),
+            T1::resolve_prechecked_self(provider, &key.1),
+            T2::resolve_prechecked_self(provider, &key.2),
+            T3::resolve_prechecked_self(provider, &key.3),
+        )
+    }
+
     fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
@@ -224,6 +253,10 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for WeakServiceProvider<TS> {
     fn resolve(_provider: &ServiceProvider<TS>) -> Self::Item {}
 
     fn resolve_prechecked(provider: &ServiceProvider<TS>, _: &()) -> Self::ItemPreChecked {
+        provider.into()
+    }
+
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, _: &()) -> Self {
         provider.into()
     }
 
@@ -269,6 +302,10 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for A
         Self::resolve(provider)
     }
 
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+        AllRegistered(Box::new(Self::resolve_prechecked(provider, key)))
+    }
+
     fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
         // Todo: Implement to avoid lookup during service resolution
         Ok(())
@@ -309,6 +346,10 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for R
         index: &Self::PrecheckResult,
     ) -> Self::ItemPreChecked {
         unsafe { resolve_unchecked::<TS, Self::ItemPreChecked>(provider, *index) }
+    }
+
+    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+        Registered(Self::resolve_prechecked(provider, key))
     }
 
     fn precheck(producers: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {

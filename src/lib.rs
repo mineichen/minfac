@@ -2,6 +2,14 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
+
 use abi_stable::{
     erased_types::interfaces::IteratorInterface,
     std_types::{
@@ -11,13 +19,6 @@ use abi_stable::{
     },
     DynTrait,
 };
-use alloc::{
-    rc::Rc,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
-use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use std::sync::OnceLock;
@@ -26,9 +27,11 @@ use untyped::{AutoFreePointer, UntypedFn};
 
 mod binary_search;
 mod lifetime;
+mod registrar;
 mod resolvable;
 mod service_provider;
 mod service_provider_factory;
+mod shared;
 #[cfg(feature = "stable_abi")]
 pub mod stable_abi;
 mod strategy;
@@ -69,10 +72,10 @@ type AnyPtr = *const ();
 pub static mut MINFAC_ERROR_HANDLER: extern "C-unwind" fn(&LifetimeError) = default_error_handler;
 
 /// Represents a query for the last registered instance of `T`
-pub struct Registered<T>(PhantomData<T>);
+pub struct Registered<T>(pub T);
 
 /// Represents a query for all registered instances of Type `T`.
-pub struct AllRegistered<T>(PhantomData<T>);
+pub struct AllRegistered<T>(pub Box<dyn Iterator<Item = T>>);
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
@@ -262,29 +265,18 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             .push(ServiceProducer::<TS>::new::<T>(factory));
     }
 
+    pub fn register_with<T: registrar::Registrar<TS>>(
+        &mut self,
+        registrar: T,
+    ) -> AliasBuilder<T::Item, TS> {
+        registrar.register(self)
+    }
+
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
-        extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
-            stage_1_data: AutoFreePointer,
-            _ctx: &mut UntypedFnFactoryContext<TS>,
-        ) -> InternalBuildResult<TS> {
-            extern "C" fn func<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
-                _: *const ServiceProvider<TS>,
-                stage_2_data: *const AutoFreePointer,
-            ) -> T {
-                let stage_2_data = unsafe { &*stage_2_data as &AutoFreePointer };
-                let ptr = stage_2_data.get_pointer();
-                let creator: fn() -> T = unsafe { core::mem::transmute(ptr) };
-                creator()
-            }
-            ROk(UntypedFn::create(func::<T, TS>, stage_1_data))
-        }
 
-        let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TS>);
-        self.producer_factories
-            .push(ServiceProducer::<TS>::new::<T>(factory));
-        AliasBuilder::new(self)
+    pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
+        self.register_with(creator)
     }
 
     /// Registers a shared service without dependencies.
@@ -314,7 +306,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (service_state_idx, fnptr) =
-                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext) };
+                    unsafe { &*(outer_ctx.get_pointer() as *const InnerContext) };
                 let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
                 provider.get_or_initialize_pos(*service_state_idx, creator)
             }
@@ -581,7 +573,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c): &InnerContext<TDep, TS> =
-                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                    unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
                 let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
                 let arg = TDep::resolve_prechecked(provider, key);
                 creator(arg)
@@ -643,7 +635,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c, service_state_idx): &InnerContext<TDep, TS> =
-                    unsafe { &*(outer_ctx.get_pointer() as *mut InnerContext<TDep, TS>) };
+                    unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
                 provider.get_or_initialize_pos(*service_state_idx, || {
                     let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
                         unsafe { std::mem::transmute(*c) };
