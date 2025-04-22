@@ -23,7 +23,7 @@ use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use std::sync::OnceLock;
 use strategy::{Identifyable, Strategy};
-use untyped::{AutoFreePointer, UntypedFn};
+use untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, UntypedFn};
 
 mod binary_search;
 mod lifetime;
@@ -43,6 +43,7 @@ pub use service_provider::ServiceIterator;
 pub use service_provider::ServiceProvider;
 pub use service_provider::WeakServiceProvider;
 pub use service_provider_factory::ServiceProviderFactory;
+pub use shared::ShareInner;
 pub use strategy::AnyStrategy;
 
 use crate::resolvable::SealedResolvable;
@@ -284,40 +285,43 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     ///
     /// Shared services must have a reference count == 0 after dropping the ServiceProvider. If an Arc is
     /// cloned and thus kept alive, ServiceProvider::drop will panic to prevent service leaking in std.
-    pub fn register_shared<T: Send + Sync>(
+    pub fn register_shared<T: Send + Sync + Identifyable<TS::Id> + FromArcAutoFreePointer>(
         &mut self,
-        creator: fn() -> Arc<T>,
-    ) -> AliasBuilder<Arc<T>, TS>
-    where
-        Arc<T>: Identifyable<TS::Id>,
-    {
+        creator: fn() -> T,
+    ) -> AliasBuilder<T, TS> {
         type InnerContext = (usize, AnyPtr);
-        extern "C" fn factory<T: Send + Sync, TS: Strategy + 'static>(
+        extern "C" fn factory<T: Send + Sync + FromArcAutoFreePointer, TS: Strategy + 'static>(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
         ) -> InternalBuildResult<TS>
         where
-            Arc<T>: Identifyable<TS::Id>,
+            T: Identifyable<TS::Id>,
         {
-            extern "C" fn func<T: Send + Sync + 'static, TS: Strategy + 'static>(
+            extern "C" fn func<
+                T: Send + Sync + 'static + FromArcAutoFreePointer + Identifyable<TS::Id>,
+                TS: Strategy + 'static,
+            >(
                 provider: *const ServiceProvider<TS>,
                 outer_ctx: *const AutoFreePointer,
-            ) -> Arc<T> {
+            ) -> T {
                 let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (service_state_idx, fnptr) =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext) };
-                let creator: fn() -> Arc<T> = unsafe { std::mem::transmute(*fnptr) };
+                let creator: fn() -> T = unsafe { std::mem::transmute(*fnptr) };
                 provider.get_or_initialize_pos(*service_state_idx, creator)
             }
             let service_state_idx = ctx.reserve_state_space();
             let inner: InnerContext = (service_state_idx, outer_ctx.get_pointer());
-            ROk(UntypedFn::create(func, AutoFreePointer::boxed(inner)))
+            ROk(UntypedFn::create(
+                func::<T, TS>,
+                AutoFreePointer::boxed(inner),
+            ))
         }
 
         let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TS>);
         self.producer_factories
-            .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));
+            .push(ServiceProducer::<TS>::new::<T>(factory));
 
         AliasBuilder::new(self)
     }

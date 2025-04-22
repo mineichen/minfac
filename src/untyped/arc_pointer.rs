@@ -1,14 +1,16 @@
+use core::mem::ManuallyDrop;
+
 use alloc::sync::Arc;
 
 use super::{super::AnyPtr, AutoFreePointer};
 
-pub struct ArcAutoFreePointer {
+pub(crate) struct ArcAutoFreePointer {
     inner: AutoFreePointer,
     downgrade_ptr: extern "C" fn(AnyPtr) -> WeakInfo,
 }
 
-impl ArcAutoFreePointer {
-    pub fn new<T: Send + Sync>(i: Arc<T>) -> Self {
+impl<T: Send + Sync> From<Arc<T>> for ArcAutoFreePointer {
+    fn from(value: Arc<T>) -> Self {
         extern "C" fn dropper<T>(i: AnyPtr) {
             drop(unsafe { Arc::from_raw(i as *const T) });
         }
@@ -34,16 +36,25 @@ impl ArcAutoFreePointer {
         }
 
         Self {
-            inner: AutoFreePointer::new(Arc::into_raw(i) as AnyPtr, dropper::<T>),
+            inner: AutoFreePointer::new(Arc::into_raw(value) as AnyPtr, dropper::<T>),
             downgrade_ptr: downgrade::<T>,
         }
     }
-    pub unsafe fn clone_inner<T>(&self) -> Arc<T> {
-        let arc = Arc::from_raw(self.inner.get_pointer() as *const T);
-        let r = arc.clone();
-        let _ = Arc::into_raw(arc);
-        r
+}
+
+pub trait FromArcAutoFreePointer: Into<ArcAutoFreePointer> {
+    unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self;
+}
+
+impl<T: Send + Sync> FromArcAutoFreePointer for Arc<T> {
+    unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self {
+        let arc =
+            unsafe { ManuallyDrop::new(Arc::from_raw(value.inner.get_pointer() as *const T)) };
+        (*arc).clone()
     }
+}
+
+impl ArcAutoFreePointer {
     pub fn downgrade(&self) -> WeakInfo {
         (self.downgrade_ptr)(self.inner.get_pointer())
     }
@@ -67,8 +78,8 @@ mod tests {
 
     #[test]
     fn create_and_drop() {
-        let x = ArcAutoFreePointer::new(Arc::new(String::from("Test")));
-        let cloned = unsafe { x.clone_inner::<String>() };
+        let x = ArcAutoFreePointer::from(Arc::new(String::from("Test")));
+        let cloned = unsafe { Arc::<String>::from_ref(&x) };
         assert_eq!(2, Arc::strong_count(&cloned));
         drop(x);
         assert_eq!(1, Arc::strong_count(&cloned));

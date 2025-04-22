@@ -4,7 +4,7 @@ use crate::{
         DanglingCheckerResult, DanglingCheckerResults, LifetimeError, OutlivedLifetimeErrorVariants,
     },
     strategy::{Identifyable, Strategy},
-    untyped::{ArcAutoFreePointer, AutoFreePointer, UntypedFn},
+    untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, UntypedFn},
     AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
@@ -172,22 +172,20 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
         UntypedFnFactory::no_alloc(std::ptr::null(), factory::<T, TS>)
     }
 
-    pub(crate) fn get_or_initialize_pos<T: Any + Send + Sync, TFn: Fn() -> Arc<T>>(
+    pub(crate) fn get_or_initialize_pos<
+        T: Any + Send + Sync + Into<ArcAutoFreePointer> + FromArcAutoFreePointer,
+        TFn: Fn() -> T,
+    >(
         &self,
         index: usize,
         initializer: TFn,
-    ) -> Arc<T> {
-        let pointer = self
-            .service_states
-            .shared_services
-            .get(index)
-            .unwrap()
-            .get_or_init(|| TypeNamed {
-                inner: ArcAutoFreePointer::new(initializer()),
-                type_name: type_name::<Arc<T>>(),
-            });
+    ) -> T {
+        let pointer = self.service_states.shared_services[index].get_or_init(|| TypeNamed {
+            inner: initializer().into(),
+            type_name: type_name::<T>(),
+        });
 
-        unsafe { pointer.inner.clone_inner::<T>() }
+        unsafe { T::from_ref(&pointer.inner) }
     }
 }
 

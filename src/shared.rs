@@ -1,74 +1,56 @@
-use core::mem::ManuallyDrop;
-use std::sync::Arc;
+use crate::{untyped::FromArcAutoFreePointer, ArcAutoFreePointer};
 
-trait Factory<T: 'static> {
-    const VTABLE: &'static ServiceBuilderVtable<T>;
+pub trait ShareInner: Sized + From<Self::Inner> {
+    type Inner: FromArcAutoFreePointer;
 }
-
-struct ArcFactory;
-impl<T: 'static> Factory<Arc<T>> for ArcFactory {
-    const VTABLE: &'static ServiceBuilderVtable<Arc<T>> = {
-        #[allow(
-            improper_ctypes_definitions,
-            reason = "Arc is not safe over FFI-Boundaries, but for single binary projects it's ok"
-        )]
-        unsafe extern "C" fn clone<T>(ptr: *const ()) -> Arc<T> {
-            let x = ManuallyDrop::new(Arc::from_raw(ptr as *const T));
-            (*x).clone()
-        }
-
-        unsafe extern "C" fn drop<T>(ptr: *const ()) {
-            Arc::from_raw(ptr);
-        }
-
-        &ServiceBuilderVtable {
-            clone: clone::<T>,
-            drop: drop::<T>,
-        }
-    };
-}
-
-#[repr(C)]
-struct ServiceBuilderVtable<T> {
-    clone: unsafe extern "C" fn(this: *const ()) -> T,
-    drop: unsafe extern "C" fn(this: *const ()),
-}
-
-#[repr(C)]
-struct SharedServiceBuilder<T: 'static> {
-    vtable: &'static ServiceBuilderVtable<T>,
-    ptr: *const (),
-}
-
-impl<T> SharedServiceBuilder<T> {
-    fn clone_inner(&self) -> T {
-        unsafe { (self.vtable.clone)(self.ptr) }
+impl<T: ShareInner> From<T> for ArcAutoFreePointer
+where
+    T::Inner: From<T> + Into<ArcAutoFreePointer>,
+{
+    fn from(value: T) -> Self {
+        (T::Inner::from(value)).into()
     }
 }
 
-impl<T> From<Arc<T>> for SharedServiceBuilder<Arc<T>> {
-    fn from(value: Arc<T>) -> Self {
-        Self {
-            vtable: <ArcFactory as Factory<Arc<T>>>::VTABLE,
-            ptr: Arc::into_raw(value) as *const Arc<T> as *const (),
-        }
-    }
-}
-
-impl<T> Drop for SharedServiceBuilder<T> {
-    fn drop(&mut self) {
-        unsafe { (self.vtable.drop)(self.ptr) }
+impl<T: ShareInner> FromArcAutoFreePointer for T
+where
+    T::Inner: From<T>,
+{
+    unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self {
+        T::from(T::Inner::from_ref(value))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use crate::ServiceCollection;
+
     use super::*;
 
     #[test]
-    fn create_arc_builder() {
-        let orig = Arc::new(vec![42i32]);
-        let builder = SharedServiceBuilder::<Arc<Vec<i32>>>::from(orig.clone());
-        assert_eq!(builder.clone_inner(), orig);
+    fn register_share_inner() {
+        struct Bar(Arc<i32>);
+
+        impl ShareInner for Bar {
+            type Inner = Arc<i32>;
+        }
+        impl From<Arc<i32>> for Bar {
+            fn from(value: Arc<i32>) -> Self {
+                Self(value)
+            }
+        }
+        impl From<Bar> for Arc<i32> {
+            fn from(value: Bar) -> Self {
+                value.0
+            }
+        }
+
+        let mut collection = ServiceCollection::new();
+        collection.register_shared(|| Bar(Arc::new(42)));
+        let provider = collection.build().unwrap();
+        assert_eq!(42, *provider.get::<Bar>().unwrap().0);
+        assert_eq!(None, provider.get::<Arc<i32>>());
     }
 }
