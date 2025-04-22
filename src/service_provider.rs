@@ -311,7 +311,7 @@ impl<T, TS: Strategy + 'static> ServiceIterator<T, TS> {
     }
 }
 
-impl<'a, TS: Strategy + 'static, T: Identifyable<TS::Id>> Iterator for ServiceIterator<T, TS> {
+impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> Iterator for ServiceIterator<T, TS> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {

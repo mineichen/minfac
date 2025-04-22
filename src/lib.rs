@@ -274,7 +274,6 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-
     pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
         self.register_with(creator)
     }
@@ -289,13 +288,13 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         creator: fn() -> T,
     ) -> AliasBuilder<T, TS> {
         type InnerContext = (usize, AnyPtr);
-        extern "C" fn factory<T: Send + Sync + FromArcAutoFreePointer, TS: Strategy + 'static>(
+        extern "C" fn factory<
+            T: Send + Sync + FromArcAutoFreePointer + Identifyable<TS::Id>,
+            TS: Strategy + 'static,
+        >(
             outer_ctx: AutoFreePointer, // No-Alloc
             ctx: &mut UntypedFnFactoryContext<TS>,
-        ) -> InternalBuildResult<TS>
-        where
-            T: Identifyable<TS::Id>,
-        {
+        ) -> InternalBuildResult<TS> {
             extern "C" fn func<
                 T: Send + Sync + 'static + FromArcAutoFreePointer + Identifyable<TS::Id>,
                 TS: Strategy + 'static,
