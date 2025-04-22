@@ -170,7 +170,7 @@ struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     cyclic_reference_candidates: &'a mut RHashMap<usize, CycleCheckerValue>,
 }
 
-impl<'a, TS: Strategy + 'static> UntypedFnFactoryContext<'a, TS> {
+impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
     fn reserve_state_space(&mut self) -> usize {
         let result: usize = *self.state_counter;
         *self.state_counter += 1;
@@ -255,7 +255,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 outer_ctx: *const AutoFreePointer,
             ) -> T {
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
-                unsafe { &*(outer_ctx.get_pointer() as *mut T) }.clone()
+                unsafe { &*(outer_ctx.get_pointer() as *const T) }.clone()
             }
             ROk(UntypedFn::create(func::<T, TS>, outer_ctx))
         }
@@ -369,7 +369,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         mut factories: Vec<ServiceProducer<TS>>,
     ) -> Result<ProducerValidationResult<TS>, BuildError<TS>> {
         let mut service_states_count: usize = 0;
-        factories.extend(self.producer_factories.into_iter());
+        factories.extend(self.producer_factories);
 
         factories.sort_by_key(|a| a.identifier);
 
@@ -441,7 +441,7 @@ struct CycleCheckerValue {
 
 struct CycleChecker<'a>(&'a mut RHashMap<usize, CycleCheckerValue>);
 
-impl<'a> CycleChecker<'a> {
+impl CycleChecker<'_> {
     fn ok(self) -> Result<(), Vec<usize>> {
         let mut stack = Vec::new();
         let map = self.0;
@@ -542,7 +542,7 @@ pub struct ServiceBuilder<'col, T: Resolvable<TS>, TS: Strategy + 'static = AnyS
     PhantomData<T>,
 );
 
-impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'col, TDep, TS> {
+impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, TDep, TS> {
     pub fn register<T: Identifyable<TS::Id>>(
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,

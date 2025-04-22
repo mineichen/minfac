@@ -165,7 +165,7 @@ mod tests {
         let mut child_provider = ServiceCollection::new();
         child_provider
             .with::<Registered<Arc<AtomicI32>>>()
-            .register(|i| Box::new(i));
+            .register(Box::new);
         let child_factory = child_provider
             .with_parent(&parent)
             .build_factory::<i64>()

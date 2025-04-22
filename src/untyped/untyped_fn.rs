@@ -35,7 +35,7 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
                 unsafe {
                     let (inner, provider) = &*((&*context as &AutoFreePointer).get_pointer()
                         as *const InnerContext<TS>);
-                    (&**inner).execute::<T>(&**provider)
+                    (**inner).execute::<T>(&**provider)
                 }
             }
             let inner: InnerContext<TS> = (inner, provider);

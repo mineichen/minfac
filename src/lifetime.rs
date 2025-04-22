@@ -69,7 +69,7 @@ impl FromIterator<DanglingCheckerResult> for DanglingCheckerResults {
 impl Debug for DanglingCheckerResults {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.write_char('[')?;
-        let mut data = unsafe { std::slice::from_raw_parts(self.ptr, self.len) }.into_iter();
+        let mut data = unsafe { std::slice::from_raw_parts(self.ptr, self.len) }.iter();
 
         if let Some(next) = data.next() {
             f.write_fmt(format_args!("{:?}", next))?;
@@ -134,7 +134,6 @@ mod tests {
             DanglingCheckerResult::new(5, "foo::bar"),
             DanglingCheckerResult::new(42, "foo::baz"),
         ]
-        .into_iter()
         .into_iter()
         .collect();
         assert_eq!(

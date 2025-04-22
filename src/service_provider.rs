@@ -217,7 +217,7 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
                     outer_ctx: AutoFreePointer,
                     _: &mut UntypedFnFactoryContext<TS>,
                 ) -> InternalBuildResult<TS> {
-                    let ptr = outer_ctx.get_pointer() as *mut OuterContextType<TS>;
+                    let ptr = outer_ctx.get_pointer() as *const OuterContextType<TS>;
                     unsafe {
                         let (parent_producer, static_self) = &*ptr;
                         Ok(parent_producer.bind(&static_self.0)).into()
