@@ -9,7 +9,7 @@ use crate::{
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
 use abi_stable::std_types::{RArc, RVec};
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 use core::{
     any::{type_name, Any},
     fmt,

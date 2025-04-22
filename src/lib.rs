@@ -5,7 +5,6 @@ extern crate alloc;
 use alloc::{
     rc::Rc,
     string::{String, ToString},
-    sync::Arc,
     vec::Vec,
 };
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
@@ -595,29 +594,23 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
 
         AliasBuilder::new(self.0)
     }
-    pub fn register_shared<T: Send + Sync>(
+    pub fn register_shared<T: Send + Sync + Identifyable<TS::Id> + FromArcAutoFreePointer>(
         &mut self,
-        creator: fn(TDep::ItemPreChecked) -> Arc<T>,
-    ) -> AliasBuilder<Arc<T>, TS>
-    where
-        Arc<T>: Identifyable<TS::Id>,
-    {
+        creator: fn(TDep::ItemPreChecked) -> T,
+    ) -> AliasBuilder<T, TS> {
         type InnerContext<TDep, TS> = (
             <TDep as SealedResolvable<TS>>::PrecheckResult,
             AnyPtr,
             usize,
         );
         extern "C" fn factory<
-            T: Send + Sync,
+            T: Send + Sync + FromArcAutoFreePointer + Identifyable<TS::Id>,
             TDep: Resolvable<TS> + 'static,
             TS: Strategy + 'static,
         >(
             outer_ctx: AutoFreePointer,
             ctx: &mut UntypedFnFactoryContext<TS>,
-        ) -> InternalBuildResult<TS>
-        where
-            Arc<T>: Identifyable<TS::Id>,
-        {
+        ) -> InternalBuildResult<TS> {
             let service_state_idx = ctx.reserve_state_space();
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
@@ -629,20 +622,19 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
                 DynTrait::from_value(data),
             );
             extern "C" fn func<
-                T: Send + Sync + 'static,
+                T: Send + Sync + 'static + FromArcAutoFreePointer + Identifyable<TS::Id>,
                 TDep: Resolvable<TS> + 'static,
                 TS: Strategy + 'static,
             >(
                 provider: *const ServiceProvider<TS>,
                 outer_ctx: *const AutoFreePointer,
-            ) -> Arc<T> {
+            ) -> T {
                 let provider = unsafe { &*provider as &ServiceProvider<TS> };
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c, service_state_idx): &InnerContext<TDep, TS> =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
                 provider.get_or_initialize_pos(*service_state_idx, || {
-                    let creator: fn(TDep::ItemPreChecked) -> Arc<T> =
-                        unsafe { std::mem::transmute(*c) };
+                    let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
                     creator(TDep::resolve_prechecked(provider, key))
                 })
             }
@@ -655,7 +647,7 @@ impl<'col, TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilde
         let factory = UntypedFnFactory::no_alloc(creator as AnyPtr, factory::<T, TDep, TS>);
         self.0
             .producer_factories
-            .push(ServiceProducer::<TS>::new::<Arc<T>>(factory));
+            .push(ServiceProducer::<TS>::new::<T>(factory));
 
         AliasBuilder::new(self.0)
     }

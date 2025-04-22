@@ -42,11 +42,14 @@ impl<T: Send + Sync> From<Arc<T>> for ArcAutoFreePointer {
     }
 }
 
+#[allow(private_bounds)]
 pub trait FromArcAutoFreePointer: Into<ArcAutoFreePointer> {
+    #[allow(private_interfaces)]
     unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self;
 }
 
 impl<T: Send + Sync> FromArcAutoFreePointer for Arc<T> {
+    #[allow(private_interfaces)]
     unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self {
         let arc =
             unsafe { ManuallyDrop::new(Arc::from_raw(value.inner.get_pointer() as *const T)) };

@@ -16,6 +16,7 @@ impl<T: ShareInner> FromArcAutoFreePointer for T
 where
     T::Inner: From<T>,
 {
+    #[allow(private_interfaces)]
     unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self {
         T::from(T::Inner::from_ref(value))
     }

@@ -62,7 +62,10 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for () {
         Ok(())
     }
 
-    fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self {
+    fn resolve_prechecked_self(
+        _provider: &ServiceProvider<TS>,
+        _key: &Self::PrecheckResult,
+    ) -> Self {
     }
 
     fn iter_positions(_: &[TS::Id]) -> Self::TypeIdsIter {
