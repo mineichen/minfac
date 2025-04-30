@@ -265,6 +265,23 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             .push(ServiceProducer::<TS>::new::<T>(factory));
     }
 
+    /// Registers a transient service. In contrast to `with::<Registered<T>>().register(|d| {...})`, the lambda
+    /// specifies the dependencies, which might be handy if the factory-fn is defined somewhere else.
+    ///
+    /// ``` rust
+    /// use {minfac::{AllRegistered,Registered, ServiceCollection, ServiceIterator, WeakServiceProvider}};
+    ///
+    /// let mut collection = ServiceCollection::new();
+    /// collection.register_with(routine as fn(_) -> _);
+    /// collection.register(|| 20u8);
+    /// collection.register(|| 22u16);
+    /// let provider = collection.build().unwrap();
+    /// assert_eq!(Some(42u32), provider.get::<u32>());
+    ///
+    /// fn routine((Registered(byte), AllRegistered(shorts)): (Registered<u8>, AllRegistered<u16>)) -> u32 {
+    ///     byte as u32 + shorts.map(|x| x as u32).sum::<u32>()
+    /// }
+    /// ```
     pub fn register_with<T: registrar::Registrar<TS>>(
         &mut self,
         registrar: T,
