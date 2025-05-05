@@ -1,3 +1,7 @@
+# 0.1.3
+
+- Add new method ServiceProvider::resolve to allow the closure to specify dependencies
+
 # 0.1.2
 
 - Add new method ServiceCollection::register_with to allow the closure to specify dependencies
