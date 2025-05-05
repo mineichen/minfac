@@ -83,7 +83,7 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResol
     type TypeIdsIter = Chain<T0::TypeIdsIter, T1::TypeIdsIter>;
 
     fn resolve(provider: &ServiceProvider<TS>) -> Self::Item {
-        (provider.resolve::<T0>(), provider.resolve::<T1>())
+        (provider.resolve_item::<T0>(), provider.resolve_item::<T1>())
     }
 
     fn resolve_prechecked(
@@ -125,9 +125,9 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolva
 
     fn resolve(provider: &ServiceProvider<TS>) -> Self::Item {
         (
-            provider.resolve::<T0>(),
-            provider.resolve::<T1>(),
-            provider.resolve::<T2>(),
+            provider.resolve_item::<T0>(),
+            provider.resolve_item::<T1>(),
+            provider.resolve_item::<T2>(),
         )
     }
     fn resolve_prechecked(
@@ -194,10 +194,10 @@ impl<
 
     fn resolve(provider: &ServiceProvider<TS>) -> Self::Item {
         (
-            provider.resolve::<T0>(),
-            provider.resolve::<T1>(),
-            provider.resolve::<T2>(),
-            provider.resolve::<T3>(),
+            provider.resolve_item::<T0>(),
+            provider.resolve_item::<T1>(),
+            provider.resolve_item::<T2>(),
+            provider.resolve_item::<T3>(),
         )
     }
     fn resolve_prechecked(

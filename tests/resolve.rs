@@ -238,7 +238,7 @@ fn resolve_shared_services() {
 }
 
 #[test]
-fn resolve_test() {
+fn get_test() {
     let mut collection = ServiceCollection::new();
     collection.register(|| 42);
     collection.register_shared(|| Arc::new(42));
@@ -249,6 +249,15 @@ fn resolve_test() {
         provider.get::<i32>(),
         provider.get::<Arc<i32>>().map(|f| *f)
     );
+}
+
+#[test]
+fn resolve_unregistered_returns_none() {
+    let collection = ServiceCollection::new();
+    let provider = collection
+        .build()
+        .expect("Expected to have all dependencies");
+    assert_eq!(None, provider.resolve::<Registered<i32>>());
 }
 
 #[test]

@@ -72,6 +72,7 @@ type AnyPtr = *const ();
 pub static mut MINFAC_ERROR_HANDLER: extern "C-unwind" fn(&LifetimeError) = default_error_handler;
 
 /// Represents a query for the last registered instance of `T`
+#[derive(Debug, PartialEq, Eq)]
 pub struct Registered<T>(pub T);
 
 /// Represents a query for all registered instances of Type `T`.

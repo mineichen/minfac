@@ -113,13 +113,31 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
     }
 
     pub fn get<T: Identifyable<TS::Id>>(&self) -> Option<T> {
-        self.resolve::<Registered<T>>()
+        self.resolve_item::<Registered<T>>()
     }
     pub fn get_all<T: Identifyable<TS::Id>>(&self) -> ServiceIterator<T, TS> {
-        self.resolve::<AllRegistered<T>>()
+        self.resolve_item::<AllRegistered<T>>()
     }
 
-    pub(crate) fn resolve<T: Resolvable<TS>>(&self) -> T::Item {
+    /// Returns the Resolvable itself. For less verbose api, consider `get` or `get_all`
+    /// This is useful for code, where a Lambda defines it's own dependencies
+    ///
+    /// ```
+    /// use minfac::{ServiceCollection, Registered};
+    /// let mut collection = ServiceCollection::new();
+    /// collection.register(|| 42);
+    /// let provider = collection
+    ///     .build()
+    ///     .expect("Expected to have all dependencies");
+    /// let Registered(x) = provider.resolve::<Registered<i32>>().unwrap();
+    /// assert_eq!(42, x);
+    /// ```
+    pub fn resolve<T: Resolvable<TS>>(&self) -> Option<T> {
+        let precheck_key = T::precheck(&self.immutable_state.types).ok()?;
+        Some(T::resolve_prechecked_self(self, &precheck_key))
+    }
+
+    pub(crate) fn resolve_item<T: Resolvable<TS>>(&self) -> T::Item {
         T::resolve(self)
     }
 
@@ -197,10 +215,6 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 pub struct WeakServiceProvider<TS: Strategy + 'static = AnyStrategy>(ServiceProvider<TS>);
 
 impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
-    fn resolve<T: Resolvable<TS>>(&self) -> T::Item {
-        T::resolve(&self.0)
-    }
-
     /// Reference for Arc<self> must be kept for the entire lifetime of the new ServiceProvider
     pub(crate) unsafe fn clone_producers(&self) -> impl Iterator<Item = ServiceProducer<TS>> {
         type OuterContextType<TS> = (&'static UntypedFn<TS>, &'static WeakServiceProvider<TS>);
@@ -230,17 +244,19 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
     }
 
     pub fn resolve_unchecked<T: Resolvable<TS>>(&self) -> T::ItemPreChecked {
-        let precheck_key =
-            T::precheck(&self.0.immutable_state.types).expect("Resolve unkwnown service");
-        T::resolve_prechecked(&self.0, &precheck_key)
+        self.0.resolve_unchecked::<T>()
+    }
+
+    pub fn resolve<T: Resolvable<TS>>(&self) -> Option<T> {
+        self.0.resolve::<T>()
     }
 
     pub fn get<T: Identifyable<TS::Id>>(&self) -> Option<T> {
-        self.resolve::<Registered<T>>()
+        self.0.get::<T>()
     }
 
     pub fn get_all<T: Identifyable<TS::Id>>(&self) -> ServiceIterator<T, TS> {
-        self.resolve::<AllRegistered<T>>()
+        self.0.get_all::<T>()
     }
 }
 
