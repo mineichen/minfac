@@ -167,7 +167,7 @@ impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
 struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
-    final_ordered_types: &'a RVec<TS::Id>,
+    final_ordered_types: &'a [TS::Id],
     cyclic_reference_candidates: &'a mut CycleChecker,
 }
 
@@ -351,13 +351,13 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         let shared_services = (0..validation.service_states_count)
             .map(|_| OnceLock::default())
             .collect();
-        let immutable_state = RArc::new(service_provider::ServiceProviderImmutableState::new(
+        let immutable_state = service_provider::ServiceProviderImmutableState::new(
             validation.types,
             validation.producers,
             RVec::new(),
-        ));
+        );
         Ok(ServiceProvider::<TS>::new(
-            immutable_state,
+            RArc::new(immutable_state),
             shared_services,
             None,
         ))
@@ -392,16 +392,15 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
         factories.sort_by_key(|a| a.identifier);
 
-        let mut final_ordered_types = factories.iter().map(|f| f.identifier).collect();
+        let types: RVec<_> = factories.iter().map(|f| f.identifier).collect();
 
         let mut cyclic_reference_candidates = CycleChecker::default();
         let mut producers = RVec::with_capacity(factories.len());
-        let mut types = RVec::with_capacity(factories.len());
 
         for (i, x) in factories.into_iter().enumerate() {
             let mut ctx = UntypedFnFactoryContext {
                 state_counter: &mut service_states_count,
-                final_ordered_types: &mut final_ordered_types,
+                final_ordered_types: &types,
                 cyclic_reference_candidates: &mut cyclic_reference_candidates,
                 service_descriptor_pos: i,
             };
@@ -412,7 +411,6 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             };
             debug_assert_eq!(&x.identifier, producer.get_result_type_id());
             producers.push(producer);
-            types.push(x.identifier);
         }
 
         cyclic_reference_candidates
