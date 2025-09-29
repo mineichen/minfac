@@ -74,7 +74,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
         ) -> InternalBuildResult<TS> {
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.into()),
+                Err(x) => return RErr(x.into_build_error::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(

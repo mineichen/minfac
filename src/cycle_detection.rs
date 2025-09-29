@@ -1,15 +1,17 @@
 use abi_stable::{
     erased_types::interfaces::IteratorInterface,
-    std_types::{RBox, RHashMap},
+    std_types::{RBox, RHashMap, RStr},
     DynTrait,
 };
 
 #[derive(Default)]
+#[repr(C)]
 pub(crate) struct CycleChecker(RHashMap<usize, CycleCheckerValue>);
 
+#[repr(C)]
 pub(crate) struct CycleCheckerValue {
     is_visited: bool,
-    type_description: &'static str,
+    type_name: RStr<'static>,
     iter: DynTrait<'static, RBox<()>, IteratorInterface<usize>>, // Use RVec
 }
 
@@ -24,7 +26,7 @@ impl CycleChecker {
             service_descriptor_pos,
             CycleCheckerValue {
                 is_visited: false,
-                type_description: type_name,
+                type_name: RStr::from_str(type_name),
                 iter: dependencies,
             },
         );
@@ -34,10 +36,10 @@ impl CycleChecker {
             indices
                 .into_iter()
                 .skip(1)
-                .map(|i| self.0.get(&i).unwrap().type_description)
+                .map(|i| self.0.get(&i).unwrap().type_name)
                 .fold(
-                    self.0.values().next().unwrap().type_description.to_string(),
-                    |acc, n| acc + " -> " + n,
+                    self.0.values().next().unwrap().type_name.to_string(),
+                    |acc, n| acc + " -> " + n.as_str(),
                 )
         })
     }

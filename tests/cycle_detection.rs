@@ -46,3 +46,15 @@ fn service_a_depends_on_other_which_has_reference_to_typeof_a_but_a_is_not_last_
     col.build()
         .expect("Expecting constellation to be resolvable");
 }
+
+#[test]
+fn only_second_depend() {
+    let mut col = ServiceCollection::new();
+    col.with::<(Registered<u8>, Registered<i32>)>()
+        .register(|_| 0i64);
+    col.with::<(Registered<u8>, Registered<i64>)>()
+        .register(|_| 1i32);
+    col.register(|| 42u8);
+    col.build()
+        .expect_err("Expecting constellation not to be resolvable");
+}

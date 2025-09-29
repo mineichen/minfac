@@ -163,11 +163,11 @@ impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
         (self.creator)(self.context, ctx)
     }
 }
-
+#[repr(C)]
 struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
-    final_ordered_types: &'a [TS::Id],
+    final_ordered_types: &'a RVec<TS::Id>,
     cyclic_reference_candidates: &'a mut CycleChecker,
 }
 
@@ -437,7 +437,11 @@ pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
 pub enum BuildError<TS: Strategy + Debug> {
     /// `name`-format is subject of change and should only be used for debugging purpose
     #[non_exhaustive]
-    MissingDependency { id: TS::Id, name: &'static str },
+    MissingDependency {
+        id: TS::Id,
+        name: &'static str,
+        dependee_name: &'static str,
+    },
     /// `description`-format is subject of change and should only be used for debugging purpose
     #[non_exhaustive]
     CyclicDependency { description: String },
@@ -446,8 +450,14 @@ pub enum BuildError<TS: Strategy + Debug> {
 // Internal, ABI-Safe representation
 #[repr(C)]
 enum InternalBuildError<TS: Strategy + Debug> {
-    MissingDependency { id: TS::Id, name: RStr<'static> },
-    CyclicDependency { description: RString },
+    MissingDependency {
+        id: TS::Id,
+        name: RStr<'static>,
+        dependee_name: RStr<'static>,
+    },
+    CyclicDependency {
+        description: RString,
+    },
 }
 
 impl<TS: Strategy + Debug> From<InternalBuildError<TS>> for BuildError<TS> {
@@ -456,9 +466,14 @@ impl<TS: Strategy + Debug> From<InternalBuildError<TS>> for BuildError<TS> {
             InternalBuildError::CyclicDependency { description } => BuildError::CyclicDependency {
                 description: description.into(),
             },
-            InternalBuildError::MissingDependency { id, name } => BuildError::MissingDependency {
+            InternalBuildError::MissingDependency {
+                id,
+                name,
+                dependee_name,
+            } => BuildError::MissingDependency {
                 id,
                 name: name.into(),
+                dependee_name: dependee_name.into(),
             },
         }
     }
@@ -470,19 +485,38 @@ impl<TS: Strategy + Debug> From<BuildError<TS>> for InternalBuildError<TS> {
             BuildError::CyclicDependency { description } => InternalBuildError::CyclicDependency {
                 description: description.into(),
             },
-            BuildError::MissingDependency { id, name } => InternalBuildError::MissingDependency {
+            BuildError::MissingDependency {
+                id,
+                name,
+                dependee_name,
+            } => InternalBuildError::MissingDependency {
                 id,
                 name: name.into(),
+                dependee_name: dependee_name.into(),
             },
         }
     }
 }
 
-impl<TS: Strategy + 'static> BuildError<TS> {
+#[derive(Debug)]
+pub struct MissingDependency<TS: Strategy> {
+    id: <TS as Strategy>::Id,
+    name: RStr<'static>,
+}
+
+impl<TS: Strategy + 'static> MissingDependency<TS> {
     fn new_missing_dependency<T: Identifyable<TS::Id>>() -> Self {
-        BuildError::MissingDependency {
-            name: type_name::<T>(),
+        MissingDependency {
+            name: RStr::from_str(type_name::<T>()),
             id: T::get_id(),
+        }
+    }
+
+    fn into_build_error<TDependee: std::any::Any>(self) -> InternalBuildError<TS> {
+        InternalBuildError::MissingDependency {
+            id: self.id,
+            name: self.name,
+            dependee_name: RStr::from_str(std::any::type_name::<TDependee>()),
         }
     }
 }
@@ -509,7 +543,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
         ) -> InternalBuildResult<TS> {
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.into()),
+                Err(x) => return RErr(x.into_build_error::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
@@ -565,7 +599,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
             let service_state_idx = ctx.reserve_state_space();
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.into()),
+                Err(x) => return RErr(x.into_build_error::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(

@@ -249,8 +249,14 @@ mod tests {
     fn create_provider_with_factory_fails_for_missing_dependency() {
         let mut collection = ServiceCollection::new();
         collection.with::<Registered<i32>>().register(|s| s as i64);
-        if let Err(BuildError::MissingDependency { id, name }) = collection.build_factory::<u32>() {
+        if let Err(BuildError::MissingDependency {
+            id,
+            name,
+            dependee_name,
+        }) = collection.build_factory::<u32>()
+        {
             assert_eq!(id, TypeId::of::<i32>());
+            assert_eq!(dependee_name, "i64");
             assert_eq!(name, "i32");
         } else {
             panic!("Expected to have missing dependency error");

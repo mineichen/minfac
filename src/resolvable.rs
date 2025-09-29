@@ -38,7 +38,7 @@ pub trait SealedResolvable<TS: Strategy + 'static> {
 
     fn resolve_prechecked_self(provider: &ServiceProvider<TS>, key: &Self::PrecheckResult) -> Self;
 
-    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>>;
+    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>>;
 
     // Iterates all positions involved in resolving the type. This is required for checking
     // missing or cyclic dependencies
@@ -58,7 +58,7 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for () {
     ) -> Self::ItemPreChecked {
     }
 
-    fn precheck(_ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(_ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         Ok(())
     }
 
@@ -103,7 +103,7 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>> SealedResol
         )
     }
 
-    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         Ok((r0, r1))
@@ -149,7 +149,7 @@ impl<TS: Strategy + 'static, T0: Resolvable<TS>, T1: Resolvable<TS>, T2: Resolva
         )
     }
 
-    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         let r2 = T2::precheck(ordered_types)?;
@@ -221,7 +221,7 @@ impl<
         )
     }
 
-    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(ordered_types: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         let r0 = T0::precheck(ordered_types)?;
         let r1 = T1::precheck(ordered_types)?;
         let r2 = T2::precheck(ordered_types)?;
@@ -263,7 +263,7 @@ impl<TS: Strategy + 'static> SealedResolvable<TS> for WeakServiceProvider<TS> {
         provider.into()
     }
 
-    fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         Ok(())
     }
 
@@ -309,7 +309,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for A
         AllRegistered(Box::new(Self::resolve_prechecked(provider, key)))
     }
 
-    fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(_: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         // Todo: Implement to avoid lookup during service resolution
         Ok(())
     }
@@ -355,9 +355,9 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>> SealedResolvable<TS> for R
         Registered(Self::resolve_prechecked(provider, key))
     }
 
-    fn precheck(producers: &[TS::Id]) -> Result<Self::PrecheckResult, BuildError<TS>> {
+    fn precheck(producers: &[TS::Id]) -> Result<Self::PrecheckResult, MissingDependency<TS>> {
         binary_search::binary_search_last_by_key(producers, &T::get_id(), |f| f)
-            .ok_or_else(BuildError::<TS>::new_missing_dependency::<T>)
+            .ok_or_else(MissingDependency::<TS>::new_missing_dependency::<T>)
     }
 
     fn iter_positions(types: &[TS::Id]) -> Self::TypeIdsIter {
