@@ -2,17 +2,13 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-use alloc::{
-    rc::Rc,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 
 use abi_stable::{
     erased_types::interfaces::IteratorInterface,
     std_types::{
-        RArc, RBox, RHashMap,
+        RArc, RBox,
         RResult::{self, RErr, ROk},
         RStr, RString, RVec,
     },
@@ -25,6 +21,7 @@ use strategy::{Identifyable, Strategy};
 use untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, UntypedFn};
 
 mod binary_search;
+mod cycle_detection;
 mod lifetime;
 mod registrar;
 mod resolvable;
@@ -45,7 +42,7 @@ pub use service_provider_factory::ServiceProviderFactory;
 pub use shared::ShareInner;
 pub use strategy::AnyStrategy;
 
-use crate::resolvable::SealedResolvable;
+use crate::{cycle_detection::CycleChecker, resolvable::SealedResolvable};
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
 type InternalBuildResult<TS> = RResult<UntypedFn<TS>, InternalBuildError<TS>>;
@@ -80,6 +77,7 @@ pub struct AllRegistered<T>(pub Box<dyn Iterator<Item = T>>);
 
 /// Collection of constructors for different types of services. Registered constructors are never called in this state.
 /// Instances can only be received by a ServiceProvider, which can be created by calling `build`
+#[repr(C)]
 pub struct GenericServiceCollection<TS: Strategy + 'static> {
     strategy: PhantomData<TS>,
     producer_factories: Vec<ServiceProducer<TS>>,
@@ -119,6 +117,7 @@ impl<'a, T: Identifyable<TS::Id>, TS: Strategy + 'static> AliasBuilder<'a, T, TS
     }
 }
 
+#[repr(C)]
 struct ServiceProducer<TS: Strategy + 'static> {
     identifier: TS::Id,
     factory: UntypedFnFactory<TS>,
@@ -141,6 +140,7 @@ type UntypedFnFactoryCreator<TS> = extern "C" fn(
     inner_context: &mut UntypedFnFactoryContext<TS>,
 ) -> InternalBuildResult<TS>;
 
+#[repr(C)]
 struct UntypedFnFactory<TS: Strategy + 'static> {
     creator: UntypedFnFactoryCreator<TS>,
     context: AutoFreePointer,
@@ -168,7 +168,7 @@ struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
     final_ordered_types: &'a RVec<TS::Id>,
-    cyclic_reference_candidates: &'a mut RHashMap<usize, CycleCheckerValue>,
+    cyclic_reference_candidates: &'a mut CycleChecker,
 }
 
 impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
@@ -177,19 +177,18 @@ impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
         *self.state_counter += 1;
         result
     }
-    fn register_cyclic_reference_candidate(
+
+    pub fn register_cyclic_reference_candidate(
         &mut self,
         type_name: &'static str,
         dependencies: DynTrait<'static, RBox<()>, IteratorInterface<usize>>,
     ) {
-        self.cyclic_reference_candidates.insert(
-            self.service_descriptor_pos,
-            CycleCheckerValue {
-                is_visited: false,
-                type_description: type_name,
-                iter: dependencies,
-            },
-        );
+        self.cyclic_reference_candidates
+            .register_cyclic_reference_candidate(
+                type_name,
+                dependencies,
+                self.service_descriptor_pos,
+            )
     }
 }
 
@@ -286,13 +285,16 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn register_with<T: registrar::Registrar<TS>>(
         &mut self,
         registrar: T,
-    ) -> AliasBuilder<T::Item, TS> {
+    ) -> AliasBuilder<'_, T::Item, TS> {
         registrar.register(self)
     }
 
     /// Registers a transient service without dependencies.
     /// To add dependencies, use `with` to generate a ServiceBuilder.
-    pub fn register<T: Identifyable<TS::Id>>(&mut self, creator: fn() -> T) -> AliasBuilder<T, TS> {
+    pub fn register<T: Identifyable<TS::Id>>(
+        &mut self,
+        creator: fn() -> T,
+    ) -> AliasBuilder<'_, T, TS> {
         self.register_with(creator)
     }
 
@@ -304,7 +306,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn register_shared<T: Send + Sync + Identifyable<TS::Id> + FromArcAutoFreePointer>(
         &mut self,
         creator: fn() -> T,
-    ) -> AliasBuilder<T, TS> {
+    ) -> AliasBuilder<'_, T, TS> {
         type InnerContext = (usize, AnyPtr);
         extern "C" fn factory<
             T: Send + Sync + FromArcAutoFreePointer + Identifyable<TS::Id>,
@@ -392,7 +394,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
         let mut final_ordered_types = factories.iter().map(|f| f.identifier).collect();
 
-        let mut cyclic_reference_candidates = RHashMap::new();
+        let mut cyclic_reference_candidates = CycleChecker::default();
         let mut producers = RVec::with_capacity(factories.len());
         let mut types = RVec::with_capacity(factories.len());
 
@@ -413,28 +415,9 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             types.push(x.identifier);
         }
 
-        CycleChecker(&mut cyclic_reference_candidates)
+        cyclic_reference_candidates
             .ok()
-            .map_err(|indices| BuildError::CyclicDependency {
-                description: indices
-                    .into_iter()
-                    .skip(1)
-                    .map(|i| {
-                        cyclic_reference_candidates
-                            .get(&i)
-                            .unwrap()
-                            .type_description
-                    })
-                    .fold(
-                        cyclic_reference_candidates
-                            .values()
-                            .next()
-                            .unwrap()
-                            .type_description
-                            .to_string(),
-                        |acc, n| acc + " -> " + n,
-                    ),
-            })?;
+            .map_err(|description| BuildError::CyclicDependency { description })?;
 
         Ok(ProducerValidationResult {
             producers,
@@ -448,53 +431,6 @@ pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
     producers: RVec<UntypedFn<TS>>,
     types: RVec<TS::Id>,
     service_states_count: usize,
-}
-
-struct CycleCheckerValue {
-    is_visited: bool,
-    type_description: &'static str,
-    iter: DynTrait<'static, RBox<()>, IteratorInterface<usize>>, // Use RVec
-}
-
-struct CycleChecker<'a>(&'a mut RHashMap<usize, CycleCheckerValue>);
-
-impl CycleChecker<'_> {
-    fn ok(self) -> Result<(), Vec<usize>> {
-        let mut stack = Vec::new();
-        let map = self.0;
-
-        loop {
-            let pos = match map.keys().next() {
-                Some(pos) => *pos,
-                _ => break,
-            };
-
-            stack.push(pos);
-            while let Some(current) = stack.last() {
-                if let Some(value) = map.get_mut(current) {
-                    if value.is_visited {
-                        return Err(stack);
-                    }
-                    value.is_visited = true;
-                    match value.iter.next() {
-                        Some(x) => {
-                            stack.push(x);
-                            continue;
-                        }
-                        None => {
-                            map.remove(current);
-                        }
-                    };
-                }
-                stack.pop();
-                if let Some(parent) = stack.last() {
-                    let state = map.get_mut(parent).unwrap();
-                    state.is_visited = false;
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 /// Possible errors when calling ServiceCollection::build() or ServiceCollection::build_factory().
@@ -563,7 +499,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
     pub fn register<T: Identifyable<TS::Id>>(
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,
-    ) -> AliasBuilder<T, TS> {
+    ) -> AliasBuilder<'_, T, TS> {
         type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, AnyPtr);
         extern "C" fn factory<
             T: Identifyable<TS::Id>,
@@ -614,7 +550,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
     pub fn register_shared<T: Send + Sync + Identifyable<TS::Id> + FromArcAutoFreePointer>(
         &mut self,
         creator: fn(TDep::ItemPreChecked) -> T,
-    ) -> AliasBuilder<T, TS> {
+    ) -> AliasBuilder<'_, T, TS> {
         type InnerContext<TDep, TS> = (
             <TDep as SealedResolvable<TS>>::PrecheckResult,
             AnyPtr,

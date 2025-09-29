@@ -19,7 +19,7 @@ pub trait Registrar<TS: Strategy> {
     fn register(
         self,
         collection: &mut GenericServiceCollection<TS>,
-    ) -> AliasBuilder<Self::Item, TS>;
+    ) -> AliasBuilder<'_, Self::Item, TS>;
 }
 
 impl<TS: Strategy, T: Identifyable<TS::Id>> Registrar<TS> for fn() -> T {
@@ -28,7 +28,7 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> Registrar<TS> for fn() -> T {
     fn register(
         self,
         collection: &mut GenericServiceCollection<TS>,
-    ) -> AliasBuilder<Self::Item, TS> {
+    ) -> AliasBuilder<'_, Self::Item, TS> {
         extern "C" fn factory<T: Identifyable<TS::Id>, TS: Strategy + 'static>(
             stage_1_data: AutoFreePointer,
             _ctx: &mut UntypedFnFactoryContext<TS>,
@@ -62,7 +62,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
     fn register(
         self,
         collection: &mut GenericServiceCollection<TS>,
-    ) -> AliasBuilder<Self::Item, TS> {
+    ) -> AliasBuilder<'_, Self::Item, TS> {
         type InnerContext<TDep, TS> = (<TDep as SealedResolvable<TS>>::PrecheckResult, AnyPtr);
         extern "C" fn factory<
             T: Identifyable<TS::Id>,
