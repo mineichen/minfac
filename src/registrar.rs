@@ -1,11 +1,9 @@
 use core::any::type_name;
 
-use abi_stable::{
-    std_types::RResult::{RErr, ROk},
-    DynTrait,
-};
+use abi_stable::std_types::RResult::{RErr, ROk};
 
 use crate::{
+    ffi::FfiUsizeIterator,
     resolvable::SealedResolvable,
     strategy::{Identifyable, Strategy},
     untyped::{AutoFreePointer, UntypedFn},
@@ -79,7 +77,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                DynTrait::from_value(data),
+                FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<
                 T: Identifyable<TS::Id>,

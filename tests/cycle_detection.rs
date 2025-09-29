@@ -58,3 +58,15 @@ fn only_second_depend() {
     col.build()
         .expect_err("Expecting constellation not to be resolvable");
 }
+
+#[test]
+fn depend_on_itself() {
+    let mut col = ServiceCollection::new();
+    col.register_with((|Registered(x): Registered<i32>| x) as fn(_) -> _);
+    match col.build() {
+        Err(BuildError::CyclicDependency { description, .. }) => {
+            assert_eq!("i32 -> i32", description);
+        }
+        e => panic!("Unexpected result {e:?}"),
+    }
+}

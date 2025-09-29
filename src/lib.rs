@@ -5,14 +5,10 @@ extern crate alloc;
 use alloc::{rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 
-use abi_stable::{
-    erased_types::interfaces::IteratorInterface,
-    std_types::{
-        RArc, RBox,
-        RResult::{self, RErr, ROk},
-        RStr, RString, RVec,
-    },
-    DynTrait,
+use abi_stable::std_types::{
+    RArc,
+    RResult::{self, RErr, ROk},
+    RStr, RString, RVec,
 };
 use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
@@ -22,6 +18,7 @@ use untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, Untyp
 
 mod binary_search;
 mod cycle_detection;
+mod ffi;
 mod lifetime;
 mod registrar;
 mod resolvable;
@@ -42,7 +39,7 @@ pub use service_provider_factory::ServiceProviderFactory;
 pub use shared::ShareInner;
 pub use strategy::AnyStrategy;
 
-use crate::{cycle_detection::CycleChecker, resolvable::SealedResolvable};
+use crate::{cycle_detection::CycleChecker, ffi::FfiUsizeIterator, resolvable::SealedResolvable};
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
 type InternalBuildResult<TS> = RResult<UntypedFn<TS>, InternalBuildError<TS>>;
@@ -181,7 +178,7 @@ impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
     pub fn register_cyclic_reference_candidate(
         &mut self,
         type_name: &'static str,
-        dependencies: DynTrait<'static, RBox<()>, IteratorInterface<usize>>,
+        dependencies: FfiUsizeIterator,
     ) {
         self.cyclic_reference_candidates
             .register_cyclic_reference_candidate(
@@ -548,7 +545,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                DynTrait::from_value(data),
+                FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<
                 T: Identifyable<TS::Id>,
@@ -604,7 +601,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
                 type_name::<TDep::ItemPreChecked>(),
-                DynTrait::from_value(data),
+                FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<
                 T: Send + Sync + 'static + FromArcAutoFreePointer + Identifyable<TS::Id>,

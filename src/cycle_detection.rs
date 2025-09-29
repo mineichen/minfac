@@ -1,8 +1,6 @@
-use abi_stable::{
-    erased_types::interfaces::IteratorInterface,
-    std_types::{RBox, RHashMap, RStr},
-    DynTrait,
-};
+use abi_stable::std_types::{RHashMap, RStr};
+
+use crate::ffi::FfiUsizeIterator;
 
 #[derive(Default)]
 #[repr(C)]
@@ -12,14 +10,14 @@ pub(crate) struct CycleChecker(RHashMap<usize, CycleCheckerValue>);
 pub(crate) struct CycleCheckerValue {
     is_visited: bool,
     type_name: RStr<'static>,
-    iter: DynTrait<'static, RBox<()>, IteratorInterface<usize>>, // Use RVec
+    iter: FfiUsizeIterator,
 }
 
 impl CycleChecker {
     pub fn register_cyclic_reference_candidate(
         &mut self,
         type_name: &'static str,
-        dependencies: DynTrait<'static, RBox<()>, IteratorInterface<usize>>,
+        dependencies: FfiUsizeIterator,
         service_descriptor_pos: usize,
     ) {
         self.0.insert(
