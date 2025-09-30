@@ -4,15 +4,17 @@ extern crate alloc;
 
 use alloc::{rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
+use std::sync::OnceLock;
 
 use abi_stable::std_types::{
     RArc,
     RResult::{self, RErr, ROk},
-    RStr, RString, RVec,
+    RString, RVec,
 };
+
+use ffi::FfiStr;
 use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
-use std::sync::OnceLock;
 use strategy::{Identifyable, Strategy};
 use untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, UntypedFn};
 
@@ -453,8 +455,8 @@ pub enum BuildError<TS: Strategy + Debug> {
 enum InternalBuildError<TS: Strategy + Debug> {
     MissingDependency {
         id: TS::Id,
-        name: RStr<'static>,
-        dependee_name: RStr<'static>,
+        name: FfiStr<'static>,
+        dependee_name: FfiStr<'static>,
     },
     CyclicDependency {
         description: RString,
@@ -502,13 +504,13 @@ impl<TS: Strategy + Debug> From<BuildError<TS>> for InternalBuildError<TS> {
 #[derive(Debug)]
 pub struct MissingDependency<TS: Strategy> {
     id: <TS as Strategy>::Id,
-    name: RStr<'static>,
+    name: FfiStr<'static>,
 }
 
 impl<TS: Strategy + 'static> MissingDependency<TS> {
     fn new_missing_dependency<T: Identifyable<TS::Id>>() -> Self {
         MissingDependency {
-            name: RStr::from_str(type_name::<T>()),
+            name: FfiStr::from(type_name::<T>()),
             id: T::get_id(),
         }
     }
@@ -517,7 +519,7 @@ impl<TS: Strategy + 'static> MissingDependency<TS> {
         InternalBuildError::MissingDependency {
             id: self.id,
             name: self.name,
-            dependee_name: RStr::from_str(std::any::type_name::<TDependee>()),
+            dependee_name: FfiStr::from(std::any::type_name::<TDependee>()),
         }
     }
 }

@@ -1,9 +1,7 @@
 use alloc::collections::BTreeMap;
-use core::marker::PhantomData;
+use core::{marker::PhantomData, ops::Deref};
 
-use abi_stable::std_types::RStr;
-
-use crate::ffi::FfiUsizeIterator;
+use crate::ffi::{FfiStr, FfiUsizeIterator};
 
 #[derive(Default)]
 #[repr(C)]
@@ -12,7 +10,7 @@ pub(crate) struct CycleChecker(BTreeMap<usize, CycleCheckerValue>);
 #[repr(C)]
 pub(crate) struct CycleCheckerValue {
     is_visited: bool,
-    type_name: RStr<'static>,
+    type_name: FfiStr<'static>,
     iter: FfiUsizeIterator,
 }
 
@@ -20,7 +18,7 @@ impl CycleChecker {
     pub fn create_inserter(&mut self) -> CycleDetectionInserter<'_> {
         extern "C" fn callback(
             ctx: *mut (),
-            type_name: RStr<'static>,
+            type_name: FfiStr<'static>,
             dependencies: FfiUsizeIterator,
             service_descriptor_pos: usize,
         ) {
@@ -48,7 +46,7 @@ impl CycleChecker {
                 .map(|i| self.0.get(&i).unwrap().type_name)
                 .fold(
                     self.0.values().next().unwrap().type_name.to_string(),
-                    |acc, n| acc + " -> " + n.as_str(),
+                    |acc, n| acc + " -> " + n.deref(),
                 )
         })
     }
@@ -95,7 +93,7 @@ pub(crate) struct CycleDetectionInserter<'a> {
     ctx: *mut (),
     callback: extern "C" fn(
         ctx: *mut (),
-        type_name: RStr<'static>,
+        type_name: FfiStr<'static>,
         dependencies: FfiUsizeIterator,
         service_descriptor_pos: usize,
     ),
@@ -105,7 +103,7 @@ pub(crate) struct CycleDetectionInserter<'a> {
 impl<'a> CycleDetectionInserter<'a> {
     pub fn insert(
         &mut self,
-        type_name: RStr<'static>,
+        type_name: FfiStr<'static>,
         dependencies: FfiUsizeIterator,
         service_descriptor_pos: usize,
     ) {
