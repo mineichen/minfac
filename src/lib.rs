@@ -82,7 +82,7 @@ pub struct AllRegistered<T>(pub Box<dyn Iterator<Item = T>>);
 #[repr(C)]
 pub struct GenericServiceCollection<TS: Strategy + 'static> {
     strategy: PhantomData<TS>,
-    producer_factories: Vec<ServiceProducer<TS>>,
+    producer_factories: RVec<ServiceProducer<TS>>,
 }
 
 /// Alias builder is used to register services, which depend on the previous service.
@@ -204,7 +204,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn new() -> Self {
         Self {
             strategy: PhantomData,
-            producer_factories: Vec::new(),
+            producer_factories: RVec::new(),
         }
     }
 

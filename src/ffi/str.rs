@@ -42,12 +42,6 @@ impl<'a> Deref for FfiStr<'a> {
     }
 }
 
-// impl<'a> From<FfiStr<'a>> for &'a str {
-//     fn from(value: FfiStr<'a>) -> Self {
-
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
