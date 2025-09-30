@@ -6,13 +6,12 @@ use alloc::{rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use std::sync::OnceLock;
 
-use abi_stable::std_types::{
-    RArc,
-    RResult::{self, RErr, ROk},
-    RVec,
-};
+use abi_stable::std_types::{RArc, RVec};
 
-use ffi::FfiStr;
+use ffi::{
+    FfiResult::{self, FfiErr, FfiOk},
+    FfiStr,
+};
 use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use strategy::{Identifyable, Strategy};
@@ -48,7 +47,7 @@ use crate::{
 };
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
-type InternalBuildResult<TS> = RResult<UntypedFn<TS>, MissingDependencyWithDependee<TS>>;
+type InternalBuildResult<TS> = FfiResult<UntypedFn<TS>, MissingDependencyWithDependee<TS>>;
 
 type AnyPtr = *const ();
 
@@ -259,7 +258,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 unsafe { &*(outer_ctx.get_pointer() as *const T) }.clone()
             }
-            ROk(UntypedFn::create(func::<T, TS>, outer_ctx))
+            FfiOk(UntypedFn::create(func::<T, TS>, outer_ctx))
         }
 
         let factory = UntypedFnFactory::boxed(instance, factory::<T, TS>);
@@ -333,7 +332,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             }
             let service_state_idx = ctx.reserve_state_space();
             let inner: InnerContext = (service_state_idx, outer_ctx.get_pointer());
-            ROk(UntypedFn::create(
+            FfiOk(UntypedFn::create(
                 func::<T, TS>,
                 AutoFreePointer::boxed(inner),
             ))
@@ -409,8 +408,8 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             };
 
             let producer = match x.factory.call(&mut ctx) {
-                ROk(x) => x,
-                RErr(e) => return Err(e.into_build_error()),
+                FfiOk(x) => x,
+                FfiErr(e) => return Err(e.into_build_error()),
             };
             debug_assert_eq!(&x.identifier, producer.get_result_type_id());
             producers.push(producer);
@@ -513,7 +512,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
         ) -> InternalBuildResult<TS> {
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.with_dependee::<T>()),
+                Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
@@ -537,7 +536,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 creator(arg)
             }
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer());
-            ROk(UntypedFn::create(
+            FfiOk(UntypedFn::create(
                 func::<T, TDep, TS>,
                 AutoFreePointer::boxed(inner),
             ))
@@ -569,7 +568,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
             let service_state_idx = ctx.reserve_state_space();
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.with_dependee::<T>()),
+                Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
@@ -594,7 +593,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 })
             }
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer(), service_state_idx);
-            ROk(UntypedFn::create(
+            FfiOk(UntypedFn::create(
                 func::<T, TDep, TS>,
                 AutoFreePointer::boxed(inner),
             ))

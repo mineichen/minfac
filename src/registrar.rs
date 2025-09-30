@@ -1,6 +1,6 @@
 use core::any::type_name;
 
-use abi_stable::std_types::RResult::{RErr, ROk};
+use crate::ffi::FfiResult::{FfiErr, FfiOk};
 
 use crate::{
     ffi::FfiUsizeIterator,
@@ -40,7 +40,7 @@ impl<TS: Strategy, T: Identifyable<TS::Id>> Registrar<TS> for fn() -> T {
                 let creator: fn() -> T = unsafe { core::mem::transmute(ptr) };
                 creator()
             }
-            ROk(UntypedFn::create(func::<T, TS>, stage_1_data))
+            FfiOk(UntypedFn::create(func::<T, TS>, stage_1_data))
         }
 
         let factory = UntypedFnFactory::no_alloc(self as AnyPtr, factory::<T, TS>);
@@ -72,7 +72,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
         ) -> InternalBuildResult<TS> {
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.with_dependee::<T>()),
+                Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
@@ -96,7 +96,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
                 creator(arg)
             }
             let inner: InnerContext<TDep, TS> = (key, outer_ctx.get_pointer());
-            ROk(UntypedFn::create(
+            FfiOk(UntypedFn::create(
                 func::<T, TDep, TS>,
                 AutoFreePointer::boxed(inner),
             ))
