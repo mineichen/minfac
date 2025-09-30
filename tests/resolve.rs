@@ -36,7 +36,7 @@ fn drop_service_provider_with_existing_shared_registered_on_panic_is_recoverable
     expected = "Some instances outlived their ServiceProvider: [alloc::sync::Arc<i32> (remaining 1)]"
 )]
 fn drop_service_provider_with_existing_shared_registered_is_panicking() {
-    let mut outer = None;
+    let outer;
     {
         let mut collection = ServiceCollection::new();
         collection.register_shared(|| Arc::new(1i32));

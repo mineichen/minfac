@@ -44,7 +44,6 @@ impl<TS: Strategy + 'static> Debug for ServiceProvider<TS> {
 /// directly are expected to have no remaining clones when they are dropped. Clones could be used in services
 /// which have a dependency to ServiceProvider or ServiceIterators<T>, which are using ServiceProvider internally)
 #[cfg(debug_assertions)]
-#[allow(clippy::needless_collect)]
 impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
     fn drop(&mut self) {
         if !self.is_root {
@@ -63,17 +62,16 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                     .shared_services
                     .into_iter()
                     .filter_map(|c| {
-                        c.get().and_then(|x| {
-                            let weak = x.inner.downgrade();
-                            if weak.strong_count() > 0 {
-                                Some(TypeNamed {
-                                    inner: weak,
-                                    type_name: x.type_name,
-                                })
-                            } else {
-                                None
-                            }
-                        })
+                        let x = c.get()?;
+                        let weak = x.inner.downgrade();
+                        if weak.strong_count() > 0 {
+                            Some(TypeNamed {
+                                inner: weak,
+                                type_name: x.type_name,
+                            })
+                        } else {
+                            None
+                        }
                     })
                     .collect();
                 let errors = checkers
@@ -85,7 +83,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                     })
                     .collect::<DanglingCheckerResults>();
 
-                if errors.len > 0 {
+                if !errors.is_empty() {
                     unsafe {
                         (crate::MINFAC_ERROR_HANDLER)(&LifetimeError::new(
                             OutlivedLifetimeErrorVariants::SharedServices(errors),
@@ -303,6 +301,7 @@ impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
     }
 }
 
+#[repr(C)]
 pub(crate) struct ServiceProviderMutableState {
     // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
     base: Option<AutoFreePointer>,

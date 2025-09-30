@@ -7,10 +7,14 @@ pub(crate) struct FfiStr<'a> {
     len: usize,
     phantom: PhantomData<&'a ()>,
 }
-
 impl<'a> std::fmt::Debug for FfiStr<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.deref().fmt(f)
+        std::fmt::Debug::fmt(self.deref(), f)
+    }
+}
+impl<'a> std::fmt::Display for FfiStr<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        std::fmt::Display::fmt(self.deref(), f)
     }
 }
 

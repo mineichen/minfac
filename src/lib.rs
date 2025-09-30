@@ -12,7 +12,6 @@ use ffi::{
     FfiResult::{self, FfiErr, FfiOk},
     FfiStr,
 };
-use lifetime::default_error_handler;
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use strategy::{Identifyable, Strategy};
 use untyped::{ArcAutoFreePointer, AutoFreePointer, FromArcAutoFreePointer, UntypedFn};
@@ -68,7 +67,8 @@ type AnyPtr = *const ();
 ///
 /// This variable only exists, if debug_assertions are enabled
 #[cfg(debug_assertions)]
-pub static mut MINFAC_ERROR_HANDLER: extern "C-unwind" fn(&LifetimeError) = default_error_handler;
+pub static mut MINFAC_ERROR_HANDLER: extern "C-unwind" fn(&LifetimeError) =
+    lifetime::default_error_handler;
 
 /// Represents a query for the last registered instance of `T`
 #[derive(Debug, PartialEq, Eq)]
