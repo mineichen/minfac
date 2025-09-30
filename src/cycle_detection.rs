@@ -1,10 +1,13 @@
-use abi_stable::std_types::{RHashMap, RStr};
+use alloc::collections::BTreeMap;
+use core::marker::PhantomData;
+
+use abi_stable::std_types::RStr;
 
 use crate::ffi::FfiUsizeIterator;
 
 #[derive(Default)]
 #[repr(C)]
-pub(crate) struct CycleChecker(RHashMap<usize, CycleCheckerValue>);
+pub(crate) struct CycleChecker(BTreeMap<usize, CycleCheckerValue>);
 
 #[repr(C)]
 pub(crate) struct CycleCheckerValue {
@@ -14,20 +17,28 @@ pub(crate) struct CycleCheckerValue {
 }
 
 impl CycleChecker {
-    pub fn register_cyclic_reference_candidate(
-        &mut self,
-        type_name: &'static str,
-        dependencies: FfiUsizeIterator,
-        service_descriptor_pos: usize,
-    ) {
-        self.0.insert(
-            service_descriptor_pos,
-            CycleCheckerValue {
-                is_visited: false,
-                type_name: RStr::from_str(type_name),
-                iter: dependencies,
-            },
-        );
+    pub fn create_inserter(&mut self) -> CycleDetectionInserter<'_> {
+        extern "C" fn callback(
+            ctx: *mut (),
+            type_name: RStr<'static>,
+            dependencies: FfiUsizeIterator,
+            service_descriptor_pos: usize,
+        ) {
+            let ctx = unsafe { &mut *(ctx as *mut CycleChecker) };
+            ctx.0.insert(
+                service_descriptor_pos,
+                CycleCheckerValue {
+                    is_visited: false,
+                    type_name,
+                    iter: dependencies,
+                },
+            );
+        }
+        CycleDetectionInserter {
+            ctx: self as *mut Self as *mut (),
+            callback,
+            phantom: PhantomData,
+        }
     }
     pub fn ok(mut self) -> Result<(), String> {
         self.ok_inner().map_err(|indices| {
@@ -76,5 +87,42 @@ impl CycleChecker {
             }
         }
         Ok(())
+    }
+}
+
+#[repr(C)]
+pub(crate) struct CycleDetectionInserter<'a> {
+    ctx: *mut (),
+    callback: extern "C" fn(
+        ctx: *mut (),
+        type_name: RStr<'static>,
+        dependencies: FfiUsizeIterator,
+        service_descriptor_pos: usize,
+    ),
+    phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> CycleDetectionInserter<'a> {
+    pub fn insert(
+        &mut self,
+        type_name: RStr<'static>,
+        dependencies: FfiUsizeIterator,
+        service_descriptor_pos: usize,
+    ) {
+        (self.callback)(self.ctx, type_name, dependencies, service_descriptor_pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert() {
+        let mut checker = CycleChecker::default();
+        let mut inserter = checker.create_inserter();
+        inserter.insert("foo".into(), FfiUsizeIterator::from_iter(0..10), 42);
+
+        checker.ok().unwrap();
     }
 }

@@ -39,7 +39,11 @@ pub use service_provider_factory::ServiceProviderFactory;
 pub use shared::ShareInner;
 pub use strategy::AnyStrategy;
 
-use crate::{cycle_detection::CycleChecker, ffi::FfiUsizeIterator, resolvable::SealedResolvable};
+use crate::{
+    cycle_detection::{CycleChecker, CycleDetectionInserter},
+    ffi::FfiUsizeIterator,
+    resolvable::SealedResolvable,
+};
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
 type InternalBuildResult<TS> = RResult<UntypedFn<TS>, InternalBuildError<TS>>;
@@ -49,11 +53,11 @@ type AnyPtr = *const ();
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
 /// - WeakServiceProvider outlives the ServiceProvider its created from
 /// - ServiceIterator<T>, which owns a WeakServiceProvider internally, outlives its ServiceProvider
-/// - Any shared service outlives its ServiceProvider
+/// - Any shared service outlives its ServiceProvidevaluer
 ///
 /// Ignoring errors is strongly discouraged, but doesn't cause any undefined behavior or memory leaks by the framework.
 /// However, leaking context specific services often lead to memory leaks in user code which are difficult to find:
-/// All shared references of a ServiceProvider are kept alive if the result of a single provider::get::<AllRegistered<i32>>() call
+/// All shared references of a ServiceProvider are kept alvalueive if the result of a single provider::get::<AllRegistered<i32>>() call
 /// is leaking it's provider. This can easily happen, if you forget to collect the results into a vector.
 /// To prevent these sneaky errors, ServiceProvider::drop() ensures that none of it's internals are kept alive when debug_assertions are enabled.
 ///
@@ -165,7 +169,7 @@ struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     service_descriptor_pos: usize,
     state_counter: &'a mut usize,
     final_ordered_types: &'a RVec<TS::Id>,
-    cyclic_reference_candidates: &'a mut CycleChecker,
+    cyclic_reference_candidates: CycleDetectionInserter<'a>,
 }
 
 impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
@@ -180,12 +184,11 @@ impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
         type_name: &'static str,
         dependencies: FfiUsizeIterator,
     ) {
-        self.cyclic_reference_candidates
-            .register_cyclic_reference_candidate(
-                type_name,
-                dependencies,
-                self.service_descriptor_pos,
-            )
+        self.cyclic_reference_candidates.insert(
+            type_name.into(),
+            dependencies,
+            self.service_descriptor_pos,
+        )
     }
 }
 
@@ -395,10 +398,11 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         let mut producers = RVec::with_capacity(factories.len());
 
         for (i, x) in factories.into_iter().enumerate() {
+            let inserter = cyclic_reference_candidates.create_inserter();
             let mut ctx = UntypedFnFactoryContext {
                 state_counter: &mut service_states_count,
                 final_ordered_types: &types,
-                cyclic_reference_candidates: &mut cyclic_reference_candidates,
+                cyclic_reference_candidates: inserter,
                 service_descriptor_pos: i,
             };
 
