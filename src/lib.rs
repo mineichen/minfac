@@ -608,7 +608,8 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
 }
 
 // At the time of writing, core::any::type_name_of_val was behind a nightly feature flag
+#[repr(C)]
 struct TypeNamed<T> {
     inner: T,
-    type_name: &'static str,
+    type_name: FfiStr<'static>,
 }

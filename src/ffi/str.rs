@@ -7,6 +7,10 @@ pub(crate) struct FfiStr<'a> {
     len: usize,
     phantom: PhantomData<&'a ()>,
 }
+
+unsafe impl<'a> Send for FfiStr<'a> {}
+unsafe impl<'a> Sync for FfiStr<'a> {}
+
 impl<'a> std::fmt::Debug for FfiStr<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         std::fmt::Debug::fmt(self.deref(), f)

@@ -78,7 +78,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                     .into_iter()
                     .filter_map(|x| {
                         (x.inner.strong_count() > 0).then(|| {
-                            DanglingCheckerResult::new(x.inner.strong_count(), x.type_name)
+                            DanglingCheckerResult::new(x.inner.strong_count(), x.type_name.into())
                         })
                     })
                     .collect::<DanglingCheckerResults>();
@@ -198,7 +198,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
     ) -> T {
         let pointer = self.service_states.shared_services[index].get_or_init(|| TypeNamed {
             inner: initializer().into(),
-            type_name: type_name::<T>(),
+            type_name: type_name::<T>().into(),
         });
 
         unsafe { T::from_ref(&pointer.inner) }

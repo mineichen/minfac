@@ -87,10 +87,10 @@ pub(crate) struct DanglingCheckerResult {
 }
 
 impl DanglingCheckerResult {
-    pub fn new(remaining_references: usize, typename: &'static str) -> Self {
+    pub fn new(remaining_references: usize, typename: FfiStr<'static>) -> Self {
         Self {
             remaining_references,
-            typename: typename.into(),
+            typename,
         }
     }
 }
@@ -115,15 +115,18 @@ mod tests {
     fn debug_dangling_checker_result() {
         assert_eq!(
             "foo::bar (remaining 5)",
-            format!("{:?}", DanglingCheckerResult::new(5, "foo::bar"))
+            format!(
+                "{:?}",
+                DanglingCheckerResult::new(5, FfiStr::from("foo::bar"))
+            )
         );
     }
 
     #[test]
     fn debug_error_dangling_services() {
         let x: DanglingCheckerResults = [
-            DanglingCheckerResult::new(5, "foo::bar"),
-            DanglingCheckerResult::new(42, "foo::baz"),
+            DanglingCheckerResult::new(5, "foo::bar".into()),
+            DanglingCheckerResult::new(42, "foo::baz".into()),
         ]
         .into_iter()
         .collect();
