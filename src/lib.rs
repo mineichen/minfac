@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use abi_stable::std_types::{
     RArc,
     RResult::{self, RErr, ROk},
-    RString, RVec,
+    RVec,
 };
 
 use ffi::FfiStr;
@@ -48,7 +48,7 @@ use crate::{
 };
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
 
-type InternalBuildResult<TS> = RResult<UntypedFn<TS>, InternalBuildError<TS>>;
+type InternalBuildResult<TS> = RResult<UntypedFn<TS>, MissingDependencyWithDependee<TS>>;
 
 type AnyPtr = *const ();
 
@@ -410,7 +410,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
             let producer = match x.factory.call(&mut ctx) {
                 ROk(x) => x,
-                RErr(e) => return Err(e.into()),
+                RErr(e) => return Err(e.into_build_error()),
             };
             debug_assert_eq!(&x.identifier, producer.get_result_type_id());
             producers.push(producer);
@@ -450,53 +450,20 @@ pub enum BuildError<TS: Strategy + Debug> {
     CyclicDependency { description: String },
 }
 
-// Internal, ABI-Safe representation
+#[derive(Debug)]
 #[repr(C)]
-enum InternalBuildError<TS: Strategy + Debug> {
-    MissingDependency {
-        id: TS::Id,
-        name: FfiStr<'static>,
-        dependee_name: FfiStr<'static>,
-    },
-    CyclicDependency {
-        description: RString,
-    },
+pub struct MissingDependencyWithDependee<TS: Strategy> {
+    id: <TS as Strategy>::Id,
+    name: FfiStr<'static>,
+    dependee_name: FfiStr<'static>,
 }
 
-impl<TS: Strategy + Debug> From<InternalBuildError<TS>> for BuildError<TS> {
-    fn from(i: InternalBuildError<TS>) -> Self {
-        match i {
-            InternalBuildError::CyclicDependency { description } => BuildError::CyclicDependency {
-                description: description.into(),
-            },
-            InternalBuildError::MissingDependency {
-                id,
-                name,
-                dependee_name,
-            } => BuildError::MissingDependency {
-                id,
-                name: name.into(),
-                dependee_name: dependee_name.into(),
-            },
-        }
-    }
-}
-
-impl<TS: Strategy + Debug> From<BuildError<TS>> for InternalBuildError<TS> {
-    fn from(i: BuildError<TS>) -> Self {
-        match i {
-            BuildError::CyclicDependency { description } => InternalBuildError::CyclicDependency {
-                description: description.into(),
-            },
-            BuildError::MissingDependency {
-                id,
-                name,
-                dependee_name,
-            } => InternalBuildError::MissingDependency {
-                id,
-                name: name.into(),
-                dependee_name: dependee_name.into(),
-            },
+impl<TS: Strategy + 'static> MissingDependencyWithDependee<TS> {
+    fn into_build_error(self) -> BuildError<TS> {
+        BuildError::MissingDependency {
+            id: self.id,
+            name: self.name.into(),
+            dependee_name: self.dependee_name.into(),
         }
     }
 }
@@ -515,11 +482,11 @@ impl<TS: Strategy + 'static> MissingDependency<TS> {
         }
     }
 
-    fn into_build_error<TDependee: std::any::Any>(self) -> InternalBuildError<TS> {
-        InternalBuildError::MissingDependency {
+    fn with_dependee<TDependee: std::any::Any>(self) -> MissingDependencyWithDependee<TS> {
+        MissingDependencyWithDependee {
             id: self.id,
-            name: self.name,
-            dependee_name: FfiStr::from(std::any::type_name::<TDependee>()),
+            name: self.name.into(),
+            dependee_name: std::any::type_name::<TDependee>().into(),
         }
     }
 }
@@ -546,7 +513,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
         ) -> InternalBuildResult<TS> {
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.into_build_error::<T>()),
+                Err(x) => return RErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
@@ -602,7 +569,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
             let service_state_idx = ctx.reserve_state_space();
             let key = match TDep::precheck(ctx.final_ordered_types) {
                 Ok(x) => x,
-                Err(x) => return RErr(x.into_build_error::<T>()),
+                Err(x) => return RErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
             ctx.register_cyclic_reference_candidate(
