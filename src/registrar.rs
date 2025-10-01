@@ -75,8 +75,8 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
                 Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
-            ctx.register_cyclic_reference_candidate(
-                type_name::<TDep::ItemPreChecked>(),
+            ctx.cyclic_reference_candidates.insert(
+                type_name::<TDep::ItemPreChecked>().into(),
                 FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<

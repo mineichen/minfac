@@ -167,7 +167,6 @@ impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
 }
 #[repr(C)]
 struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
-    service_descriptor_pos: usize,
     state_counter: &'a mut usize,
     final_ordered_types: &'a RVec<TS::Id>,
     cyclic_reference_candidates: CycleDetectionInserter<'a>,
@@ -178,18 +177,6 @@ impl<TS: Strategy + 'static> UntypedFnFactoryContext<'_, TS> {
         let result: usize = *self.state_counter;
         *self.state_counter += 1;
         result
-    }
-
-    pub fn register_cyclic_reference_candidate(
-        &mut self,
-        type_name: &'static str,
-        dependencies: FfiUsizeIterator,
-    ) {
-        self.cyclic_reference_candidates.insert(
-            type_name.into(),
-            dependencies,
-            self.service_descriptor_pos,
-        )
     }
 }
 
@@ -396,24 +383,25 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         let types: RVec<_> = factories.iter().map(|f| f.identifier).collect();
 
         let mut cyclic_reference_candidates = CycleChecker::default();
-        let mut producers = RVec::with_capacity(factories.len());
+        let producers = factories
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| {
+                let mut ctx = UntypedFnFactoryContext {
+                    state_counter: &mut service_states_count,
+                    final_ordered_types: &types,
+                    cyclic_reference_candidates: cyclic_reference_candidates.create_inserter(i),
+                };
 
-        for (i, x) in factories.into_iter().enumerate() {
-            let inserter = cyclic_reference_candidates.create_inserter();
-            let mut ctx = UntypedFnFactoryContext {
-                state_counter: &mut service_states_count,
-                final_ordered_types: &types,
-                cyclic_reference_candidates: inserter,
-                service_descriptor_pos: i,
-            };
-
-            let producer = match x.factory.call(&mut ctx) {
-                FfiOk(x) => x,
-                FfiErr(e) => return Err(e.into_build_error()),
-            };
-            debug_assert_eq!(&x.identifier, producer.get_result_type_id());
-            producers.push(producer);
-        }
+                match x.factory.call(&mut ctx) {
+                    FfiOk(producer) => {
+                        debug_assert_eq!(&x.identifier, producer.get_result_type_id());
+                        Ok(producer)
+                    }
+                    FfiErr(e) => Err(e.into_build_error()),
+                }
+            })
+            .collect::<Result<_, _>>()?;
 
         cyclic_reference_candidates
             .ok()
@@ -515,8 +503,8 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
-            ctx.register_cyclic_reference_candidate(
-                type_name::<TDep::ItemPreChecked>(),
+            ctx.cyclic_reference_candidates.insert(
+                type_name::<TDep::ItemPreChecked>().into(),
                 FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<
@@ -571,8 +559,8 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 Err(x) => return FfiErr(x.with_dependee::<T>()),
             };
             let data = TDep::iter_positions(ctx.final_ordered_types);
-            ctx.register_cyclic_reference_candidate(
-                type_name::<TDep::ItemPreChecked>(),
+            ctx.cyclic_reference_candidates.insert(
+                type_name::<TDep::ItemPreChecked>().into(),
                 FfiUsizeIterator::from_iter(data),
             );
             extern "C" fn func<

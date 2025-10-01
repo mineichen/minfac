@@ -15,7 +15,7 @@ pub(crate) struct CycleCheckerValue {
 }
 
 impl CycleChecker {
-    pub fn create_inserter(&mut self) -> CycleDetectionInserter<'_> {
+    pub fn create_inserter(&mut self, service_descriptor_pos: usize) -> CycleDetectionInserter<'_> {
         extern "C" fn callback(
             ctx: *mut (),
             type_name: FfiStr<'static>,
@@ -36,6 +36,7 @@ impl CycleChecker {
             ctx: self as *mut Self as *mut (),
             callback,
             phantom: PhantomData,
+            service_descriptor_pos,
         }
     }
     pub fn ok(mut self) -> Result<(), String> {
@@ -97,17 +98,18 @@ pub(crate) struct CycleDetectionInserter<'a> {
         dependencies: FfiUsizeIterator,
         service_descriptor_pos: usize,
     ),
+    service_descriptor_pos: usize,
     phantom: PhantomData<&'a ()>,
 }
 
 impl<'a> CycleDetectionInserter<'a> {
-    pub fn insert(
-        &mut self,
-        type_name: FfiStr<'static>,
-        dependencies: FfiUsizeIterator,
-        service_descriptor_pos: usize,
-    ) {
-        (self.callback)(self.ctx, type_name, dependencies, service_descriptor_pos)
+    pub fn insert(&mut self, type_name: FfiStr<'static>, dependencies: FfiUsizeIterator) {
+        (self.callback)(
+            self.ctx,
+            type_name,
+            dependencies,
+            self.service_descriptor_pos,
+        )
     }
 }
 
@@ -118,8 +120,8 @@ mod tests {
     #[test]
     fn insert() {
         let mut checker = CycleChecker::default();
-        let mut inserter = checker.create_inserter();
-        inserter.insert("foo".into(), FfiUsizeIterator::from_iter(0..10), 42);
+        let mut inserter = checker.create_inserter(42);
+        inserter.insert("foo".into(), FfiUsizeIterator::from_iter(0..10));
 
         checker.ok().unwrap();
     }
