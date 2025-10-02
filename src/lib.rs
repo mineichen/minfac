@@ -456,6 +456,7 @@ impl<TS: Strategy + 'static> MissingDependencyWithDependee<TS> {
 }
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct MissingDependency<TS: Strategy> {
     id: <TS as Strategy>::Id,
     name: FfiStr<'static>,

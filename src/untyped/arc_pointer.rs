@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 
 use super::{super::AnyPtr, AutoFreePointer};
 
+#[repr(C)]
 pub(crate) struct ArcAutoFreePointer {
     inner: AutoFreePointer,
     downgrade_ptr: extern "C" fn(AnyPtr) -> WeakInfo,
@@ -46,6 +47,7 @@ impl<T: Send + Sync> From<Arc<T>> for ArcAutoFreePointer {
 pub trait FromArcAutoFreePointer: Into<ArcAutoFreePointer> {
     #[allow(private_interfaces)]
     unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self;
+    pub drop
 }
 
 impl<T: Send + Sync> FromArcAutoFreePointer for Arc<T> {
