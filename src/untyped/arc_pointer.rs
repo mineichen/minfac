@@ -47,7 +47,6 @@ impl<T: Send + Sync> From<Arc<T>> for ArcAutoFreePointer {
 pub trait FromArcAutoFreePointer: Into<ArcAutoFreePointer> {
     #[allow(private_interfaces)]
     unsafe fn from_ref(value: &ArcAutoFreePointer) -> Self;
-    pub drop
 }
 
 impl<T: Send + Sync> FromArcAutoFreePointer for Arc<T> {
