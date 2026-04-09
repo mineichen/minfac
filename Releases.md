@@ -1,7 +1,7 @@
 # 0.1.4
 
 - Add new method ServiceProvider::has to allow checking, if a type was registered
-- Implement std::fmt::Display and std::error::Error for BuildError
+- Implement core::fmt::Display, core::error::Error and core::clone::Clone for BuildError
 
 # 0.1.3
 
