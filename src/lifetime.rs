@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 use core::fmt::Formatter;
-use std::fmt::Write;
+use core::fmt::Write;
 
 use abi_stable::std_types::RVec;
 
@@ -25,7 +25,7 @@ impl LifetimeError {
 }
 
 impl Debug for LifetimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self.0 {
             OutlivedLifetimeErrorVariants::WeakServiceProvider {
                 remaining_references,

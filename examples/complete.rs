@@ -1,10 +1,8 @@
 //! This example combines all features of this library, except errorhandling
 //! If you can understand all assertions, you've seen all aspects of this library
+use std::sync::Arc;
 
-use {
-    minfac::{AllRegistered, Registered, ServiceCollection, WeakServiceProvider},
-    std::sync::Arc,
-};
+use minfac::{AllRegistered, Registered, ServiceCollection, WeakServiceProvider};
 
 fn main() {
     let mut parent_collection = ServiceCollection::new();

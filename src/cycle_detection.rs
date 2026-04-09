@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use core::{marker::PhantomData, ops::Deref};
 
 use crate::ffi::{FfiStr, FfiUsizeIterator};

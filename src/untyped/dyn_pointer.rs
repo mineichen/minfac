@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use super::super::AnyPtr;
 
 #[repr(C)]

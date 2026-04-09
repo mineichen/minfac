@@ -11,14 +11,14 @@ pub(crate) struct FfiStr<'a> {
 unsafe impl<'a> Send for FfiStr<'a> {}
 unsafe impl<'a> Sync for FfiStr<'a> {}
 
-impl<'a> std::fmt::Debug for FfiStr<'a> {
+impl<'a> core::fmt::Debug for FfiStr<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        std::fmt::Debug::fmt(self.deref(), f)
+        core::fmt::Debug::fmt(self.deref(), f)
     }
 }
-impl<'a> std::fmt::Display for FfiStr<'a> {
+impl<'a> core::fmt::Display for FfiStr<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        std::fmt::Display::fmt(self.deref(), f)
+        core::fmt::Display::fmt(self.deref(), f)
     }
 }
 
@@ -36,8 +36,8 @@ impl<'a> From<&'a str> for FfiStr<'a> {
 impl<'a> From<FfiStr<'a>> for &'a str {
     fn from(value: FfiStr<'a>) -> Self {
         unsafe {
-            let bytes = std::slice::from_raw_parts(value.ptr, value.len);
-            std::str::from_utf8_unchecked(bytes)
+            let bytes = core::slice::from_raw_parts(value.ptr, value.len);
+            core::str::from_utf8_unchecked(bytes)
         }
     }
 }

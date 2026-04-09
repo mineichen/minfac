@@ -42,7 +42,7 @@ impl<TS: Strategy + 'static> Debug for ServiceProvider<TS> {
 
 /// Dropping ServiceProviders created by ServiceCollection::build() or ServiceProviderFactory::build()
 /// directly are expected to have no remaining clones when they are dropped. Clones could be used in services
-/// which have a dependency to ServiceProvider or ServiceIterators<T>, which are using ServiceProvider internally)
+/// which have a dependency to `ServiceProvider` or `ServiceIterators<T>`, which are using ServiceProvider internally)
 #[cfg(debug_assertions)]
 impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
     fn drop(&mut self) {
@@ -117,6 +117,27 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
         self.resolve_item::<AllRegistered<T>>()
     }
 
+    /// Checks, wether a type with a specific identifier was registered
+    /// ```
+    /// use std::{any::TypeId, sync::Arc};
+    /// use minfac::ServiceCollection;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut collection = ServiceCollection::new();
+    /// collection.register(|| 42);
+    /// collection.register_shared(|| Arc::new(42));
+    /// let provider = collection.build()?;
+    /// assert!(provider.has(&TypeId::of::<i32>()),);
+    /// assert!(provider.has(&TypeId::of::<Arc<i32>>()));
+    /// assert!(!provider.has(&TypeId::of::<Arc<u32>>()));
+    /// assert!(!provider.has(&TypeId::of::<u32>()));
+    /// # Ok(())
+    /// # }
+    ///```
+    pub fn has(&self, identifier: &TS::Id) -> bool {
+        self.immutable_state.types.binary_search(identifier).is_ok()
+    }
+
     /// Returns the Resolvable itself. For less verbose api, consider `get` or `get_all`
     /// This is useful for code, where a Lambda defines it's own dependencies
     ///
@@ -185,7 +206,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
             Ok(UntypedFn::create(creator::<T, TS>, stage_1_data)).into()
         }
 
-        UntypedFnFactory::no_alloc(std::ptr::null(), factory::<T, TS>)
+        UntypedFnFactory::no_alloc(core::ptr::null(), factory::<T, TS>)
     }
 
     pub(crate) fn get_or_initialize_pos<
@@ -208,7 +229,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 /// Weak ServiceProviders have the same public API as ServiceProviders, but cannot outlive
 /// their original ServiceProvider. If they do, the minfac::ERROR_HANDLER is called.
 ///
-/// In contrast to std::sync::Arc<T> / std::sync::Weak<T>, WeakServiceProviders prevent
+/// In contrast to `std::sync::Arc<T>` / `std::sync::Weak<T>`, `WeakServiceProvider`s prevent
 /// their parent from being vanished, if minfac::ERROR_HANDLER doesn't panic
 pub struct WeakServiceProvider<TS: Strategy + 'static = AnyStrategy>(ServiceProvider<TS>);
 

@@ -55,7 +55,7 @@ impl<TS: Strategy + 'static> UntypedFn<TS> {
     // Unsafe constraint: Must be called with the same T as it was created
     pub unsafe fn execute<T>(&self, provider: &ServiceProvider<TS>) -> T {
         let lambda: extern "C" fn(&ServiceProvider<TS>, &AutoFreePointer) -> T =
-            std::mem::transmute(self.factory_pointer);
+            core::mem::transmute(self.factory_pointer);
         (lambda)(provider, &self.context)
     }
 

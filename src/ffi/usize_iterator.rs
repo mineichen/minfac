@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 #[repr(C)]
 pub(crate) struct FfiUsizeIterator {
     data: *mut (),

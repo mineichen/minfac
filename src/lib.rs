@@ -2,7 +2,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-use alloc::{rc::Rc, string::String, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use std::sync::OnceLock;
 
@@ -51,15 +51,15 @@ type InternalBuildResult<TS> = FfiResult<UntypedFn<TS>, MissingDependencyWithDep
 type AnyPtr = *const ();
 
 /// Handles lifetime errors, which cannot be enforced using the type system. This is the case when:
-/// - WeakServiceProvider outlives the ServiceProvider its created from
-/// - ServiceIterator<T>, which owns a WeakServiceProvider internally, outlives its ServiceProvider
+/// - WeakServiceProvider outlives the `ServiceProvider` its created from
+/// - `ServiceIterator<T>`, which owns a `WeakServiceProvider` internally, outlives its `ServiceProvider`
 /// - Any shared service outlives its ServiceProvidevaluer
 ///
 /// Ignoring errors is strongly discouraged, but doesn't cause any undefined behavior or memory leaks by the framework.
 /// However, leaking context specific services often lead to memory leaks in user code which are difficult to find:
-/// All shared references of a ServiceProvider are kept alvalueive if the result of a single provider::get::<AllRegistered<i32>>() call
+/// All shared references of a `ServiceProvider` are kept alvalueive if the result of a single `provider::get::<AllRegistered<i32>>()` call
 /// is leaking it's provider. This can easily happen, if you forget to collect the results into a vector.
-/// To prevent these sneaky errors, ServiceProvider::drop() ensures that none of it's internals are kept alive when debug_assertions are enabled.
+/// To prevent these sneaky errors, `ServiceProvider::drop()` ensures that none of it's internals are kept alive when debug_assertions are enabled.
 ///
 /// The default implementation panics, if the std-feature is enabled (on by default). Otherwise this is a no_op
 /// For custom implementations, be aware that this function could be called while panicking already.
@@ -314,7 +314,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (service_state_idx, fnptr) =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext) };
-                let creator: fn() -> T = unsafe { std::mem::transmute(*fnptr) };
+                let creator: fn() -> T = unsafe { core::mem::transmute(*fnptr) };
                 provider.get_or_initialize_pos(*service_state_idx, creator)
             }
             let service_state_idx = ctx.reserve_state_space();
@@ -423,8 +423,8 @@ pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
 
 /// Possible errors when calling ServiceCollection::build() or ServiceCollection::build_factory().
 #[non_exhaustive]
-#[derive(Debug, PartialEq, Eq)]
-pub enum BuildError<TS: Strategy + Debug> {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum BuildError<TS: Strategy> {
     /// `name`-format is subject of change and should only be used for debugging purpose
     #[non_exhaustive]
     MissingDependency {
@@ -436,6 +436,25 @@ pub enum BuildError<TS: Strategy + Debug> {
     #[non_exhaustive]
     CyclicDependency { description: String },
 }
+
+impl<TS: Strategy + Debug> core::fmt::Display for BuildError<TS> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            BuildError::MissingDependency {
+                id,
+                name,
+                dependee_name,
+            } => f.write_fmt(format_args!(
+                "{dependee_name} is missing dependency {name} ({id:?})"
+            )),
+            BuildError::CyclicDependency { description } => {
+                f.write_fmt(format_args!("detected cyclic dependency: {description}"))
+            }
+        }
+    }
+}
+
+impl<TS: Strategy + Debug> core::error::Error for BuildError<TS> {}
 
 #[derive(Debug)]
 #[repr(C)]
@@ -470,11 +489,11 @@ impl<TS: Strategy + 'static> MissingDependency<TS> {
         }
     }
 
-    fn with_dependee<TDependee: std::any::Any>(self) -> MissingDependencyWithDependee<TS> {
+    fn with_dependee<TDependee: core::any::Any>(self) -> MissingDependencyWithDependee<TS> {
         MissingDependencyWithDependee {
             id: self.id,
             name: self.name.into(),
-            dependee_name: std::any::type_name::<TDependee>().into(),
+            dependee_name: core::any::type_name::<TDependee>().into(),
         }
     }
 }
@@ -520,7 +539,7 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c): &InnerContext<TDep, TS> =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
-                let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
+                let creator: fn(TDep::ItemPreChecked) -> T = unsafe { core::mem::transmute(*c) };
                 let arg = TDep::resolve_prechecked(provider, key);
                 creator(arg)
             }
@@ -577,7 +596,8 @@ impl<TDep: Resolvable<TS> + 'static, TS: Strategy + 'static> ServiceBuilder<'_, 
                 let (key, c, service_state_idx): &InnerContext<TDep, TS> =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
                 provider.get_or_initialize_pos(*service_state_idx, || {
-                    let creator: fn(TDep::ItemPreChecked) -> T = unsafe { std::mem::transmute(*c) };
+                    let creator: fn(TDep::ItemPreChecked) -> T =
+                        unsafe { core::mem::transmute(*c) };
                     creator(TDep::resolve_prechecked(provider, key))
                 })
             }

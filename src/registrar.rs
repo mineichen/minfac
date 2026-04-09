@@ -91,7 +91,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id>, TDep: Resolvable<TS> + 'st
                 let outer_ctx = unsafe { &*outer_ctx as &AutoFreePointer };
                 let (key, c): &InnerContext<TDep, TS> =
                     unsafe { &*(outer_ctx.get_pointer() as *const InnerContext<TDep, TS>) };
-                let creator: fn(TDep) -> T = unsafe { std::mem::transmute(*c) };
+                let creator: fn(TDep) -> T = unsafe { core::mem::transmute(*c) };
                 let arg = TDep::resolve_prechecked_self(provider, key);
                 creator(arg)
             }

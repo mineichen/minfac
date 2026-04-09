@@ -1,3 +1,8 @@
+# 0.1.4
+
+- Add new method ServiceProvider::has to allow checking, if a type was registered
+- Implement std::fmt::Display and std::error::Error for BuildError
+
 # 0.1.3
 
 - Add new method ServiceProvider::resolve to allow the closure to specify dependencies
