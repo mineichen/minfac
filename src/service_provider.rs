@@ -277,6 +277,10 @@ impl<TS: Strategy + 'static> WeakServiceProvider<TS> {
     pub fn get_all<T: Identifyable<TS::Id>>(&self) -> ServiceIterator<T, TS> {
         self.0.get_all::<T>()
     }
+
+    pub fn has(&self, identifier: &TS::Id) -> bool {
+        self.0.has(identifier)
+    }
 }
 
 impl<TS: Strategy + 'static> Clone for WeakServiceProvider<TS> {

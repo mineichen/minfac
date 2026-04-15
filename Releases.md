@@ -1,3 +1,7 @@
+# 0.1.5
+
+- Add new method WeakServiceProvider::has to keep symmetry with ServiceProvider
+
 # 0.1.4
 
 - Add new method ServiceProvider::has to allow checking, if a type was registered
