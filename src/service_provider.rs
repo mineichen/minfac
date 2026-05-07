@@ -1,5 +1,6 @@
 use crate::{
     binary_search,
+    ffi::FfiVec,
     lifetime::{
         DanglingCheckerResult, DanglingCheckerResults, LifetimeError, OutlivedLifetimeErrorVariants,
     },
@@ -160,7 +161,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
         T::resolve(self)
     }
 
-    pub(crate) fn get_producers(&self) -> &RVec<UntypedFn<TS>> {
+    pub(crate) fn get_producers(&self) -> &[UntypedFn<TS>] {
         &self.immutable_state.producers
     }
 
@@ -306,17 +307,17 @@ impl<'a, TS: Strategy + 'static> From<&'a ServiceProvider<TS>> for WeakServicePr
 }
 
 pub(crate) struct ServiceProviderImmutableState<TS: Strategy + 'static> {
-    types: RVec<TS::Id>,
-    producers: RVec<UntypedFn<TS>>,
+    types: FfiVec<TS::Id>,
+    producers: FfiVec<UntypedFn<TS>>,
     // Unsafe-Code, which generates UntypedFn from parent, relies on the fact that parent ServiceProvider outlives this state
-    _parents: RVec<WeakServiceProvider<TS>>,
+    _parents: FfiVec<WeakServiceProvider<TS>>,
 }
 
 impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
     pub(crate) fn new(
-        types: RVec<TS::Id>,
-        producers: RVec<UntypedFn<TS>>,
-        _parents: RVec<WeakServiceProvider<TS>>,
+        types: FfiVec<TS::Id>,
+        producers: FfiVec<UntypedFn<TS>>,
+        _parents: FfiVec<WeakServiceProvider<TS>>,
     ) -> Self {
         Self {
             types,

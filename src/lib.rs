@@ -6,11 +6,11 @@ use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use std::sync::OnceLock;
 
-use abi_stable::std_types::{RArc, RVec};
+use abi_stable::std_types::RArc;
 
 use ffi::{
     FfiResult::{self, FfiErr, FfiOk},
-    FfiStr,
+    FfiStr, FfiVec,
 };
 use service_provider_factory::ServiceProviderFactoryBuilder;
 use strategy::{Identifyable, Strategy};
@@ -82,7 +82,7 @@ pub struct AllRegistered<T>(pub Box<dyn Iterator<Item = T>>);
 #[repr(C)]
 pub struct GenericServiceCollection<TS: Strategy + 'static> {
     strategy: PhantomData<TS>,
-    producer_factories: RVec<ServiceProducer<TS>>,
+    producer_factories: FfiVec<ServiceProducer<TS>>,
 }
 
 /// Alias builder is used to register services, which depend on the previous service.
@@ -168,7 +168,7 @@ impl<TS: Strategy + 'static> UntypedFnFactory<TS> {
 #[repr(C)]
 struct UntypedFnFactoryContext<'a, TS: Strategy + 'static> {
     state_counter: &'a mut usize,
-    final_ordered_types: &'a RVec<TS::Id>,
+    final_ordered_types: &'a FfiVec<TS::Id>,
     cyclic_reference_candidates: CycleDetectionInserter<'a>,
 }
 
@@ -191,7 +191,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn new() -> Self {
         Self {
             strategy: PhantomData,
-            producer_factories: RVec::new(),
+            producer_factories: FfiVec::new(),
         }
     }
 
@@ -342,7 +342,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
         let immutable_state = service_provider::ServiceProviderImmutableState::new(
             validation.types,
             validation.producers,
-            RVec::new(),
+            FfiVec::new(),
         );
         Ok(ServiceProvider::<TS>::new(
             RArc::new(immutable_state),
@@ -361,7 +361,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn build_factory<T: Clone + Identifyable<TS::Id> + Send + Sync>(
         self,
     ) -> Result<ServiceProviderFactory<T, TS>, BuildError<TS>> {
-        ServiceProviderFactory::<_, TS>::create(self, RVec::new())
+        ServiceProviderFactory::<_, TS>::create(self, FfiVec::new())
     }
 
     pub fn with_parent(
@@ -380,7 +380,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 
         factories.sort_by_key(|a| a.identifier);
 
-        let types: RVec<_> = factories.iter().map(|f| f.identifier).collect();
+        let types: FfiVec<_> = factories.iter().map(|f| f.identifier).collect();
 
         let mut cyclic_reference_candidates = CycleChecker::default();
         let producers = factories
@@ -416,8 +416,8 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
 }
 
 pub(crate) struct ProducerValidationResult<TS: Strategy + 'static> {
-    producers: RVec<UntypedFn<TS>>,
-    types: RVec<TS::Id>,
+    producers: FfiVec<UntypedFn<TS>>,
+    types: FfiVec<TS::Id>,
     service_states_count: usize,
 }
 

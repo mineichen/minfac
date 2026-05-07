@@ -1,14 +1,14 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 /// Ffi-safe equivalent of `Result<T, E>`.
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
-pub enum FfiResult<T, E> {
+pub(crate) enum FfiResult<T, E> {
     FfiOk(T),
     FfiErr(E),
 }
 
-pub use self::FfiResult::*;
+pub(crate) use self::FfiResult::*;
 
 impl<T, E> From<Result<T, E>> for FfiResult<T, E> {
     fn from(value: Result<T, E>) -> Self {

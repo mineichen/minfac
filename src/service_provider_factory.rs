@@ -1,11 +1,12 @@
 use crate::{
+    ffi::FfiVec,
     service_provider::ServiceProviderImmutableState,
     strategy::{Identifyable, Strategy},
     untyped::AutoFreePointer,
     AnyStrategy, GenericServiceCollection, ProducerValidationResult, ServiceProducer,
     ServiceProvider, WeakServiceProvider,
 };
-use abi_stable::std_types::{RArc, RVec};
+use abi_stable::std_types::RArc;
 use alloc::vec::Vec;
 use core::{clone::Clone, marker::PhantomData};
 use std::sync::OnceLock;
@@ -34,7 +35,7 @@ pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy + 'static
 
 pub struct ServiceProviderFactoryBuilder<TS: Strategy + 'static> {
     collection: GenericServiceCollection<TS>,
-    providers: RVec<WeakServiceProvider<TS>>,
+    providers: FfiVec<WeakServiceProvider<TS>>,
 }
 
 impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
@@ -42,7 +43,7 @@ impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
         collection: GenericServiceCollection<TS>,
         first_parent: WeakServiceProvider<TS>,
     ) -> Self {
-        let mut providers = RVec::with_capacity(1);
+        let mut providers = FfiVec::with_capacity(1);
         providers.push(first_parent);
         Self {
             collection,
@@ -59,9 +60,9 @@ impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
 impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
     ServiceProviderFactory<T, TS>
 {
-    pub fn create(
+    pub(crate) fn create(
         mut collection: GenericServiceCollection<TS>,
-        parents: RVec<WeakServiceProvider<TS>>,
+        parents: FfiVec<WeakServiceProvider<TS>>,
     ) -> Result<Self, super::BuildError<TS>> {
         let parent_service_factories: Vec<_> = parents
             .iter()

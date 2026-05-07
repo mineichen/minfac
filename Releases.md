@@ -1,3 +1,5 @@
+- Breaking: Make ServiceProviderFactory::create `pub(crate)`. In the process of removing stable_abi, this internal API accidentally became public
+
 # 0.1.5
 
 - Add new method WeakServiceProvider::has to keep symmetry with ServiceProvider

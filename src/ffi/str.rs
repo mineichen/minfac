@@ -18,7 +18,7 @@ impl<'a> core::fmt::Debug for FfiStr<'a> {
 }
 impl<'a> core::fmt::Display for FfiStr<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(self.deref(), f)
+        (&**self).fmt(f)
     }
 }
 
