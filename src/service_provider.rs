@@ -9,7 +9,7 @@ use crate::{
     AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
-use abi_stable::std_types::{RArc, RVec};
+use abi_stable::std_types::RArc;
 use alloc::vec::Vec;
 use core::{
     any::{type_name, Any},
@@ -53,7 +53,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
 
         let mut swapped_service_states = RArc::new(ServiceProviderMutableState {
             base: None,
-            shared_services: RVec::new(),
+            shared_services: FfiVec::new(),
         });
         swap(&mut swapped_service_states, &mut self.service_states);
 
@@ -167,7 +167,7 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
 
     pub(crate) fn new(
         immutable_state: RArc<ServiceProviderImmutableState<TS>>,
-        shared_services: RVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
+        shared_services: FfiVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
         base: Option<AutoFreePointer>,
     ) -> Self {
         Self {
@@ -331,7 +331,7 @@ impl<TS: Strategy + 'static> ServiceProviderImmutableState<TS> {
 pub(crate) struct ServiceProviderMutableState {
     // Placeholder for the type which is provided when serviceProvider is built from ServiceFactory
     base: Option<AutoFreePointer>,
-    shared_services: RVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
+    shared_services: FfiVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
 }
 
 /// Type used to retrieve all instances `T` of a `ServiceProvider`.

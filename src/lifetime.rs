@@ -2,9 +2,7 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use core::fmt::Write;
 
-use abi_stable::std_types::RVec;
-
-use crate::ffi::FfiStr;
+use crate::ffi::{FfiStr, FfiVec};
 
 pub extern "C-unwind" fn default_error_handler(error: &LifetimeError) {
     #[cfg(feature = "std")]
@@ -50,7 +48,7 @@ pub(crate) enum OutlivedLifetimeErrorVariants {
 }
 
 #[repr(C)]
-pub(crate) struct DanglingCheckerResults(RVec<DanglingCheckerResult>);
+pub(crate) struct DanglingCheckerResults(FfiVec<DanglingCheckerResult>);
 
 impl DanglingCheckerResults {
     pub fn is_empty(&self) -> bool {
