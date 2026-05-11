@@ -6,8 +6,6 @@ use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::{any::type_name, cell::RefCell, fmt::Debug, marker::PhantomData};
 use std::sync::OnceLock;
 
-use abi_stable::std_types::RArc;
-
 use ffi::{
     FfiResult::{self, FfiErr, FfiOk},
     FfiStr, FfiVec,
@@ -41,7 +39,7 @@ pub use strategy::AnyStrategy;
 
 use crate::{
     cycle_detection::{CycleChecker, CycleDetectionInserter},
-    ffi::FfiUsizeIterator,
+    ffi::{FfiArc, FfiUsizeIterator},
     resolvable::SealedResolvable,
 };
 pub type ServiceCollection = GenericServiceCollection<AnyStrategy>;
@@ -345,7 +343,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
             FfiVec::new(),
         );
         Ok(ServiceProvider::<TS>::new(
-            RArc::new(immutable_state),
+            FfiArc::new(immutable_state),
             shared_services,
             None,
         ))

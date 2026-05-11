@@ -18,8 +18,8 @@ struct FfiVecVtable<T: 'static> {
     drop_uninit: extern "C" fn(&mut FfiVec<T>),
 }
 
-unsafe impl<T> Send for FfiVec<T> {}
-unsafe impl<T> Sync for FfiVec<T> {}
+unsafe impl<T: Send> Send for FfiVec<T> {}
+unsafe impl<T: Sync> Sync for FfiVec<T> {}
 
 impl<T: 'static> IntoIterator for FfiVec<T> {
     type Item = T;

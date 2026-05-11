@@ -1,12 +1,11 @@
 use crate::{
-    ffi::FfiVec,
+    ffi::{FfiArc, FfiVec},
     service_provider::ServiceProviderImmutableState,
     strategy::{Identifyable, Strategy},
     untyped::AutoFreePointer,
     AnyStrategy, GenericServiceCollection, ProducerValidationResult, ServiceProducer,
     ServiceProvider, WeakServiceProvider,
 };
-use abi_stable::std_types::RArc;
 use alloc::vec::Vec;
 use core::{clone::Clone, marker::PhantomData};
 use std::sync::OnceLock;
@@ -29,7 +28,7 @@ use std::sync::OnceLock;
 /// ```
 pub struct ServiceProviderFactory<T: Clone + Send + Sync, TS: Strategy + 'static = AnyStrategy> {
     service_states_count: usize,
-    immutable_state: RArc<crate::service_provider::ServiceProviderImmutableState<TS>>,
+    immutable_state: FfiArc<crate::service_provider::ServiceProviderImmutableState<TS>>,
     anticipated: PhantomData<T>,
 }
 
@@ -81,7 +80,7 @@ impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
             service_states_count,
         } = collection.validate_producers(parent_service_factories)?;
 
-        let immutable_state = RArc::new(ServiceProviderImmutableState::<TS>::new(
+        let immutable_state = FfiArc::new(ServiceProviderImmutableState::<TS>::new(
             types, producers, parents,
         ));
 

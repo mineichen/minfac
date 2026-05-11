@@ -1,6 +1,6 @@
 use crate::{
     binary_search,
-    ffi::FfiVec,
+    ffi::{FfiArc, FfiVec},
     lifetime::{
         DanglingCheckerResult, DanglingCheckerResults, LifetimeError, OutlivedLifetimeErrorVariants,
     },
@@ -9,7 +9,6 @@ use crate::{
     AllRegistered, AnyStrategy, InternalBuildResult, Registered, Resolvable, ServiceProducer,
     TypeNamed, UntypedFnFactory, UntypedFnFactoryContext,
 };
-use abi_stable::std_types::RArc;
 use alloc::vec::Vec;
 use core::{
     any::{type_name, Any},
@@ -25,8 +24,8 @@ use std::sync::OnceLock;
 /// out of scope, all related WeakServiceProviders and shared services have to be dropped already. Otherwise
 /// dropping the original ServiceProvider results in a call to minfac::ERROR_HANDLER, which panics in std and enabled debug_assertions
 pub struct ServiceProvider<TS: Strategy + 'static = AnyStrategy> {
-    immutable_state: RArc<ServiceProviderImmutableState<TS>>,
-    service_states: RArc<ServiceProviderMutableState>,
+    immutable_state: FfiArc<ServiceProviderImmutableState<TS>>,
+    service_states: FfiArc<ServiceProviderMutableState>,
     #[cfg(debug_assertions)]
     is_root: bool,
 }
@@ -51,13 +50,13 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
             return;
         }
 
-        let mut swapped_service_states = RArc::new(ServiceProviderMutableState {
+        let mut swapped_service_states = FfiArc::new(ServiceProviderMutableState {
             base: None,
             shared_services: FfiVec::new(),
         });
         swap(&mut swapped_service_states, &mut self.service_states);
 
-        match RArc::try_unwrap(swapped_service_states) {
+        match FfiArc::try_unwrap(swapped_service_states) {
             Ok(service_states) => {
                 let checkers: Vec<_> = service_states
                     .shared_services
@@ -93,7 +92,7 @@ impl<TS: Strategy + 'static> Drop for ServiceProvider<TS> {
                 }
             }
             Err(x) => unsafe {
-                let remaining_references = RArc::strong_count(&x) - 1;
+                let remaining_references = x - 1;
                 crate::MINFAC_ERROR_HANDLER(&LifetimeError::new(
                     OutlivedLifetimeErrorVariants::WeakServiceProvider {
                         remaining_references,
@@ -166,14 +165,14 @@ impl<TS: Strategy + 'static> ServiceProvider<TS> {
     }
 
     pub(crate) fn new(
-        immutable_state: RArc<ServiceProviderImmutableState<TS>>,
+        immutable_state: FfiArc<ServiceProviderImmutableState<TS>>,
         shared_services: FfiVec<OnceLock<TypeNamed<ArcAutoFreePointer>>>,
         base: Option<AutoFreePointer>,
     ) -> Self {
         Self {
             immutable_state,
 
-            service_states: RArc::new(ServiceProviderMutableState {
+            service_states: FfiArc::new(ServiceProviderMutableState {
                 shared_services,
                 base,
             }),
