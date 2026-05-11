@@ -1,4 +1,9 @@
-- Breaking: Make ServiceProviderFactory::create `pub(crate)`. In the process of removing stable_abi, this internal API accidentally became public
+# 0.1.6
+
+- Remove all usages of `stable_abi`, as some of it's dependencies are outdated/unmaintained and cause long build times
+- Breaking: Turn `pub ServiceProviderFactory::create` into `pub(crate) ServiceProviderFactory::create_internal`. This internal API accidentally became public in past releases.
+  In the process of removing stable_abi for builds without `abi_stable`-feature, we have to get rid of this function, because it accepts a `abi_stable::std_types::RVec`.
+  This is not expected to be used in the wild, but if you rely on it, activate the `abi_stable` feature to make it available and open a ticket on github to talk about it's deprecation.
 
 # 0.1.5
 

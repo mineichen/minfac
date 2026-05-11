@@ -359,7 +359,7 @@ impl<TS: Strategy + 'static> GenericServiceCollection<TS> {
     pub fn build_factory<T: Clone + Identifyable<TS::Id> + Send + Sync>(
         self,
     ) -> Result<ServiceProviderFactory<T, TS>, BuildError<TS>> {
-        ServiceProviderFactory::<_, TS>::create(self, FfiVec::new())
+        ServiceProviderFactory::<_, TS>::create_internal(self, FfiVec::new())
     }
 
     pub fn with_parent(

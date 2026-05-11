@@ -1,6 +1,6 @@
 [package]
 name = "minfac"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["Markus Ineichen <kusi.ineichen@gmail.com>"]
 description = "Lightweight Inversion Of Control"
 repository = "https://github.com/mineichen/minfac"
@@ -11,9 +11,9 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-abi_stable = { version = "0.11", default-features = false } 
+abi_stable = { version = "0.11", default-features = false, optional = true } 
 
 [features]
 default = ["std"] # Currently broken without std (dependency for abi_stable)
-stable_abi = []
+stable_abi = ["abi_stable"]
 std = []

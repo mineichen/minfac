@@ -1,5 +1,6 @@
 # Lightweight Inversion Of Control
-``` rust
+
+```rust
 use {minfac::{Registered, ServiceCollection}};
 
 let mut collection = ServiceCollection::new();
@@ -12,9 +13,12 @@ let provider = collection.build().expect("Configuration is valid");
 assert_eq!(Some(2i16), provider.get::<i16>());
 
 ```
+
 # Features
-- Register Types/Traits which are not part of your crate (e.g. std::*). No macros needed.
+
+- Register Types/Traits which are not part of your crate (e.g. std::\*). No macros needed.
 - Service registration from separately compiled dynamic libraries. see `examples/distributed_simple` for more details
+- Lightweight: No external dependencies
 - Transient services are retrieved as `T` without any additional frills, SharedServices as `Arc<T>`
 - Inheritance instead of scoped services (Service requests can be delegated to parent `ServiceProvider`s)
 - Service discovery, (`provider.get_all::<MyService>()` returns an iterator, which lazily generates all registered `MyService` instances)
@@ -27,14 +31,16 @@ assert_eq!(Some(2i16), provider.get::<i16>());
 - `ServiceProvider` implements Send+Sync and is threadsafe without using locks
 
 Visit the examples/documentation for more details
+
 ## Required Tasks for stable release
+
 ✅ Transient services - New instance per request  
 ✅ Shared services - Shared instance per ServiceProvider  
-✅ Instance services - Shared instance per ServiceProviderFactory  
+✅ Instance services - Shared instance per ServiceProviderFactory
 
 ✅ ServiceProviderFactory for creating ServiceProvider's with minimal overhead  
 ✅ ServiceProviderFactory inherit services from ServiceProvider  
-⬜ ServiceProviderFactory inherit services from other ServiceProviderFactory  
+⬜ ServiceProviderFactory inherit services from other ServiceProviderFactory
 
 ✅ Replaceable strategy for service identification (TypeIds might change between rust versions)  
 ✅ Recursive dependencies check  

@@ -52,14 +52,24 @@ impl<TS: Strategy + 'static> ServiceProviderFactoryBuilder<TS> {
     pub fn build_factory<T: Identifyable<TS::Id> + Clone + Send + Sync>(
         self,
     ) -> Result<ServiceProviderFactory<T, TS>, super::BuildError<TS>> {
-        ServiceProviderFactory::<T, TS>::create(self.collection, self.providers)
+        ServiceProviderFactory::<T, TS>::create_internal(self.collection, self.providers)
     }
 }
 
 impl<TS: Strategy + 'static, T: Identifyable<TS::Id> + Clone + Send + Sync>
     ServiceProviderFactory<T, TS>
 {
-    pub(crate) fn create(
+    #[deprecated = "Should only be used via ServiceProviderFactoryBuilder. If you have a valid usecase, open a ticket on github"]
+    #[cfg(feature = "stable_abi")]
+    pub fn create(
+        collection: GenericServiceCollection<TS>,
+        parents: abi_stable::std_types::RVec<WeakServiceProvider<TS>>,
+    ) -> Result<Self, super::BuildError<TS>> {
+        let vec = parents.into_vec();
+        Self::create_internal(collection, vec.into())
+    }
+
+    pub(crate) fn create_internal(
         mut collection: GenericServiceCollection<TS>,
         parents: FfiVec<WeakServiceProvider<TS>>,
     ) -> Result<Self, super::BuildError<TS>> {
